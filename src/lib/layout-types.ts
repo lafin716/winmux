@@ -21,6 +21,12 @@ export interface Workspace {
   id: string;
   name: string;
   icon?: string;
+  // 1-based, monotonic per session-store; never reused. Used as the daemon-name prefix
+  // so session names remain unique across workspaces (e.g. `w1.session-1`).
+  index: number;
+  // Deprecated — session-number allocation is now derived from live session names.
+  // Field is retained for back-compat with persisted stores.
+  nextSessionSeq: number;
   layout: LayoutNode;
 }
 

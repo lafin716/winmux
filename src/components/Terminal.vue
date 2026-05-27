@@ -104,6 +104,8 @@ async function init() {
   // Resize on container resize
   resizeObserver = new ResizeObserver(() => safeFit());
   resizeObserver.observe(host.value);
+
+  if (props.active) term.focus();
 }
 
 function safeFit() {

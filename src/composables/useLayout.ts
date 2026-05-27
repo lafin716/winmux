@@ -7,6 +7,12 @@ import type {
 } from "../lib/layout-types";
 import { makeLeaf, nodeId } from "../lib/layout-types";
 
+export const MAX_PANES = 16;
+
+export function leafCount(root: LayoutNode): number {
+  return collectAllLeaves(root).length;
+}
+
 export function isLeaf(node: LayoutNode): node is LeafNode {
   return node.kind === "leaf";
 }
@@ -339,6 +345,108 @@ export function computeDropZone(
   if (minDist === distRight) return "right";
   if (minDist === distTop) return "top";
   return "bottom";
+}
+
+/** Build the chain of (split, childIndex) from root down to the given leaf. */
+function findPath(
+  root: LayoutNode,
+  leafId: string,
+): Array<{ split: SplitNode; index: number }> | null {
+  if (isLeaf(root)) return root.id === leafId ? [] : null;
+  for (let i = 0; i < root.children.length; i++) {
+    const sub = findPath(root.children[i], leafId);
+    if (sub) return [{ split: root, index: i }, ...sub];
+  }
+  return null;
+}
+
+/** Dive into a subtree to pick the leaf closest in the given direction. */
+function diveToLeaf(node: LayoutNode, dir: "left" | "right" | "up" | "down"): string {
+  let cur = node;
+  while (isSplit(cur)) {
+    const matchH = (dir === "left" || dir === "right") && cur.direction === "horizontal";
+    const matchV = (dir === "up" || dir === "down") && cur.direction === "vertical";
+    if (matchH || matchV) {
+      const lastIdx = cur.children.length - 1;
+      const pickLast = dir === "left" || dir === "up";
+      cur = cur.children[pickLast ? lastIdx : 0];
+    } else {
+      cur = cur.children[0];
+    }
+  }
+  return cur.id;
+}
+
+/**
+ * Find the leaf id adjacent to `leafId` in the given direction, walking up the
+ * ancestry until a matching-direction split with a usable sibling is found.
+ * Returns null when no neighbor exists (current leaf is at the edge in that direction).
+ */
+export function findNeighborLeafId(
+  root: LayoutNode,
+  leafId: string,
+  dir: "left" | "right" | "up" | "down",
+): string | null {
+  const path = findPath(root, leafId);
+  if (!path) return null;
+  const wantDir: Direction = (dir === "left" || dir === "right") ? "horizontal" : "vertical";
+  const offset = (dir === "left" || dir === "up") ? -1 : 1;
+  for (let i = path.length - 1; i >= 0; i--) {
+    const { split, index } = path[i];
+    if (split.direction !== wantDir) continue;
+    const sibIdx = index + offset;
+    if (sibIdx < 0 || sibIdx >= split.children.length) continue;
+    return diveToLeaf(split.children[sibIdx], dir);
+  }
+  return null;
+}
+
+/**
+ * Replace the target leaf with two nested 50/50 splits using two new sessions.
+ * The original leaf occupies 1/2 of the resulting area; the named corner gets
+ * `sessionAId` (focus target), the cell sharing the inner column gets `sessionBId`.
+ */
+export function quadrantSplitLeaf(
+  root: LayoutNode,
+  targetLeafId: string,
+  sessionAId: string,
+  sessionBId: string,
+  corner: "tl" | "tr" | "bl" | "br",
+): LayoutNode {
+  const target = findLeafById(root, targetLeafId);
+  if (!target) return root;
+
+  const leafA = makeLeaf(nodeId("leaf"), [sessionAId], sessionAId);
+  const leafB = makeLeaf(nodeId("leaf"), [sessionBId], sessionBId);
+
+  // Inner vertical split: A on top for TL/TR, on bottom for BL/BR.
+  const innerChildren: LayoutNode[] =
+    (corner === "tl" || corner === "tr") ? [leafA, leafB] : [leafB, leafA];
+  const inner: SplitNode = {
+    kind: "split",
+    id: nodeId("split"),
+    direction: "vertical",
+    sizes: [0.5, 0.5],
+    children: innerChildren,
+  };
+
+  // Outer horizontal split: inner on left for TL/BL, on right for TR/BR.
+  const outerChildren: LayoutNode[] =
+    (corner === "tl" || corner === "bl") ? [inner, target] : [target, inner];
+  const outer: SplitNode = {
+    kind: "split",
+    id: nodeId("split"),
+    direction: "horizontal",
+    sizes: [0.5, 0.5],
+    children: outerChildren,
+  };
+
+  if (root === target) return outer;
+
+  const found = findParent(root, target.id);
+  if (!found) return root;
+  found.parent.children[found.index] = outer;
+  return root;
 }
 
 export function zoneToSplit(zone: DropZone): {

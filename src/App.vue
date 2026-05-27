@@ -6,14 +6,17 @@ import StatusBar from "./components/StatusBar.vue";
 import SplitContainer from "./components/SplitContainer.vue";
 import MenuBar from "./components/MenuBar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
+import ConfirmModal from "./components/ConfirmModal.vue";
 import { api } from "./lib/tauri";
-import { useSessions } from "./composables/useSessions";
+import { useSessions, nextDaemonName, displayName } from "./composables/useSessions";
 import { useWorkspaces, loadFromStorage } from "./composables/useWorkspaces";
 import { useFocus } from "./composables/useFocus";
 import { usePrefixKey } from "./composables/usePrefixKey";
 import { useKeybindings, loadKeybindingsFromStorage } from "./composables/useKeybindings";
-import { useGlobalShortcuts, registerAction } from "./composables/useGlobalShortcuts";
+import { useGlobalShortcuts, registerAction, registerFocusSessionByIndex } from "./composables/useGlobalShortcuts";
 import { useSettings } from "./composables/useSettings";
+import { useConfirm } from "./composables/useConfirm";
+import { loadPrefsFromStorage, cycleSidebarMode } from "./composables/usePrefs";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
   addTabToLeaf,
@@ -21,18 +24,26 @@ import {
   collectAllSessionIds,
   findFirstLeaf,
   findLeafById,
+  findLeafBySession,
+  findNeighborLeafId,
+  leafCount,
+  MAX_PANES,
+  moveTabToLeaf,
   pruneMissing,
+  quadrantSplitLeaf,
   splitLeaf,
 } from "./composables/useLayout";
 
-const { state: sessState, refresh, create, kill, focusedSession, rename } = useSessions();
+const { state: sessState, refresh, create, kill, focusedSession, workspaceSessions, rename } = useSessions();
 const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const { settingsOpen, openSettings } = useSettings();
 const { prefixFor } = useKeybindings();
+const { confirm } = useConfirm();
 useGlobalShortcuts();
 
 async function bootstrap() {
+  loadPrefsFromStorage();
   loadKeybindingsFromStorage();
   loadFromStorage();
   await refresh();
@@ -76,17 +87,29 @@ async function bootstrap() {
 async function promptRename() {
   const s = focusedSession.value;
   if (!s) return;
-  const name = window.prompt("Rename session", s.name);
+  const name = window.prompt("Rename session", displayName(s.name));
   if (name && name.trim()) await rename(s.id, name.trim());
 }
 
 async function killFocused() {
   const s = focusedSession.value;
   if (!s) return;
-  if (confirm(`Kill session "${s.name}"?`)) {
+  const ok = await confirm({
+    message: `Kill session "${displayName(s.name)}"?`,
+    confirmLabel: "Kill",
+    rememberKey: "skipKillSessionConfirm",
+  });
+  if (ok) {
     await kill(s.id);
     if (sessState.sessions.length === 0) await create();
   }
+}
+
+async function killFocusedNow() {
+  const s = focusedSession.value;
+  if (!s) return;
+  await kill(s.id);
+  if (sessState.sessions.length === 0) await create();
 }
 
 async function detach() {
@@ -116,15 +139,78 @@ function selectByIndexInLeaf(i: number) {
 async function splitAndCreate(direction: "horizontal" | "vertical") {
   const ws = activeWorkspace.value;
   if (!ws || !focusedLeafId.value) return;
-  const info = await api.createSession({});
+  if (leafCount(ws.layout) >= MAX_PANES) {
+    alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
+    return;
+  }
+  const info = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
   sessState.sessions.push(info);
   const newRoot = splitLeaf(ws.layout, focusedLeafId.value, info.id, direction, "after");
   if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
 }
 
+function focusSessionByGlobalDelta(delta: number) {
+  const list = workspaceSessions.value;
+  const n = list.length;
+  if (n === 0) return;
+  const cur = focusedSession.value;
+  const idx = cur ? list.findIndex((s) => s.id === cur.id) : -1;
+  const base = idx < 0 ? 0 : idx;
+  focusSessionByIndex((base + delta + n) % n);
+}
+
+async function splitOrMove(dir: "left" | "right" | "up" | "down") {
+  const ws = activeWorkspace.value;
+  if (!ws || !focusedLeafId.value) return;
+  const cur = findLeafById(ws.layout, focusedLeafId.value);
+  if (!cur) return;
+  const neighborId = findNeighborLeafId(ws.layout, cur.id, dir);
+  if (neighborId) {
+    const sessionId = cur.activeTabId;
+    if (!sessionId) {
+      setFocusedLeaf(neighborId);
+      return;
+    }
+    const newRoot = moveTabToLeaf(ws.layout, sessionId, neighborId);
+    if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
+    setFocusedLeaf(neighborId);
+  } else {
+    if (leafCount(ws.layout) >= MAX_PANES) {
+      alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
+      return;
+    }
+    const direction = (dir === "left" || dir === "right") ? "horizontal" : "vertical";
+    const position = (dir === "left" || dir === "up") ? "before" : "after";
+    const info = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+    sessState.sessions.push(info);
+    const newRoot = splitLeaf(ws.layout, cur.id, info.id, direction, position);
+    if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
+    const newLeaf = findLeafBySession(newRoot, info.id);
+    if (newLeaf) setFocusedLeaf(newLeaf.id);
+  }
+}
+
+async function quadrantSplit(corner: "tl" | "tr" | "bl" | "br") {
+  const ws = activeWorkspace.value;
+  if (!ws || !focusedLeafId.value) return;
+  if (leafCount(ws.layout) + 2 > MAX_PANES) {
+    alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
+    return;
+  }
+  const a = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+  sessState.sessions.push(a);
+  const b = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+  sessState.sessions.push(b);
+  const newRoot = quadrantSplitLeaf(ws.layout, focusedLeafId.value, a.id, b.id, corner);
+  if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
+  const focusLeaf = findLeafBySession(newRoot, a.id);
+  if (focusLeaf) setFocusedLeaf(focusLeaf.id);
+}
+
 const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
   "session.new": async () => { await create(); },
   "session.kill": () => killFocused(),
+  "session.killNoConfirm": () => killFocusedNow(),
   "session.rename": () => promptRename(),
   "session.cycleNext": () => cycleInLeaf(1),
   "session.cyclePrev": () => cycleInLeaf(-1),
@@ -132,12 +218,36 @@ const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
   "pane.splitVertical": () => splitAndCreate("vertical"),
   "window.detach": () => detach(),
   "settings.open": () => openSettings(),
+  "session.focusPrev": () => focusSessionByGlobalDelta(-1),
+  "session.focusNext": () => focusSessionByGlobalDelta(1),
+  "pane.splitOrMoveLeft": () => splitOrMove("left"),
+  "pane.splitOrMoveRight": () => splitOrMove("right"),
+  "pane.splitOrMoveUp": () => splitOrMove("up"),
+  "pane.splitOrMoveDown": () => splitOrMove("down"),
+  "pane.quadrantTopLeft": () => quadrantSplit("tl"),
+  "pane.quadrantTopRight": () => quadrantSplit("tr"),
+  "pane.quadrantBottomLeft": () => quadrantSplit("bl"),
+  "pane.quadrantBottomRight": () => quadrantSplit("br"),
+  "view.cycleSidebar": () => cycleSidebarMode(),
 };
 
 for (const a of ACTIONS) {
   const h = ACTION_HANDLERS[a.id as ActionId];
   if (h) registerAction(a.id as ActionId, h);
 }
+
+function focusSessionByIndex(i: number) {
+  const s = workspaceSessions.value[i];
+  if (!s) return;
+  const ws = activeWorkspace.value;
+  if (!ws) return;
+  const leaf = findLeafBySession(ws.layout, s.id);
+  if (!leaf) return;
+  leaf.activeTabId = s.id;
+  setFocusedLeaf(leaf.id);
+}
+
+registerFocusSessionByIndex(focusSessionByIndex);
 
 usePrefixKey(async (key) => {
   // Numeric tab selection is hard-wired (not a configurable action).
@@ -168,6 +278,7 @@ onMounted(bootstrap);
     </div>
     <StatusBar />
     <SettingsModal v-if="settingsOpen" />
+    <ConfirmModal />
   </div>
 </template>
 
@@ -182,6 +293,20 @@ html, body, #app {
   font-family: Inter, "Segoe UI", sans-serif;
 }
 * { box-sizing: border-box; }
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover { background: #555; }
+*::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+.xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
 </style>
 
 <style scoped>

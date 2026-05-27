@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { Icon } from "@iconify/vue";
 import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
+import { usePrefs, cycleSidebarMode } from "../composables/usePrefs";
 import { collectAllSessionIds, addTabToLeaf, findFirstLeaf } from "../composables/useLayout";
 
 const {
@@ -13,6 +15,7 @@ const {
   setActiveWorkspace,
 } = useWorkspaces();
 const { kill } = useSessions();
+const { prefs } = usePrefs();
 
 const editingId = ref<string | null>(null);
 const editValue = ref("");
@@ -85,10 +88,29 @@ function closeMenu() {
 }
 
 const canDelete = computed(() => state.workspaces.length > 1);
+
+const toggleIcon = computed(() => {
+  switch (prefs.sidebarMode) {
+    case "expanded":
+      return "mdi:chevron-left";
+    case "compact":
+    case "minimal":
+    default:
+      return "mdi:chevron-right";
+  }
+});
+
+function onRootClick() {
+  if (prefs.sidebarMode === "minimal") {
+    cycleSidebarMode();
+    return;
+  }
+  closeMenu();
+}
 </script>
 
 <template>
-  <aside class="sidebar" @click="closeMenu">
+  <aside :class="['sidebar', 'mode-' + prefs.sidebarMode]" @click="onRootClick">
     <div
       v-for="ws in state.workspaces"
       :key="ws.id"
@@ -111,10 +133,21 @@ const canDelete = computed(() => state.workspaces.length > 1);
         />
       </template>
       <template v-else>
-        <div class="icon">{{ initialOf(ws.name, ws.icon) }}</div>
+        <div v-if="prefs.sidebarMode !== 'expanded'" class="icon">
+          {{ initialOf(ws.name, ws.icon) }}
+        </div>
+        <span v-if="prefs.sidebarMode === 'expanded'" class="ws-name">{{ ws.name }}</span>
       </template>
     </div>
     <button class="add" title="New workspace" @click.stop="addWorkspace">+</button>
+    <button
+      class="mode-toggle"
+      :class="'mt-' + prefs.sidebarMode"
+      :title="'Sidebar: ' + prefs.sidebarMode + ' (Ctrl+Shift+B)'"
+      @click.stop="cycleSidebarMode"
+    >
+      <Icon class="chev" :icon="toggleIcon" />
+    </button>
 
     <div
       v-if="menuFor"
@@ -136,6 +169,7 @@ const canDelete = computed(() => state.workspaces.length > 1);
 
 <style scoped>
 .sidebar {
+  position: relative;
   width: 56px;
   background: #1b1b1b;
   border-right: 1px solid #111;
@@ -199,11 +233,108 @@ input {
   color: #888;
   font-size: 18px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 .add:hover {
   color: #e6e6e6;
   border-color: #4ec9b0;
 }
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: #1a1a1a;
+  transition: background 120ms ease, transform 220ms ease, opacity 220ms ease;
+}
+.mode-toggle .chev {
+  display: inline-block;
+  font-size: 18px;
+}
+.mode-toggle.mt-compact {
+  width: 44px;
+  height: 28px;
+  border-radius: 6px;
+  background: #4ec9b0;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.mode-toggle.mt-compact:hover { background: #5fd9c0; }
+.mode-toggle.mt-expanded {
+  width: 100%;
+  height: 32px;
+  border-radius: 6px;
+  background: #4ec9b0;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.mode-toggle.mt-expanded:hover { background: #5fd9c0; }
+.mode-toggle.mt-minimal {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #4ec9b0;
+  transform: translate(-50%, -50%);
+  opacity: 0.55;
+  z-index: 20;
+}
+.sidebar.mode-minimal:hover .mode-toggle.mt-minimal,
+.mode-toggle.mt-minimal:hover {
+  transform: translate(0, -50%);
+  opacity: 1;
+}
+.ws-name { display: none; }
+
+.sidebar.mode-expanded {
+  width: 200px;
+  align-items: stretch;
+  padding: 6px 8px;
+}
+.sidebar.mode-expanded .ws {
+  width: 100%;
+  height: 36px;
+  border-radius: 6px;
+  justify-content: flex-start;
+  padding: 0 10px;
+  gap: 10px;
+}
+.sidebar.mode-expanded .ws-name {
+  display: inline;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.sidebar.mode-expanded .add { width: 100%; }
+.sidebar.mode-expanded input {
+  width: 100%;
+  text-align: left;
+}
+
+.sidebar.mode-minimal {
+  width: 6px;
+  padding: 0;
+  cursor: pointer;
+  gap: 0;
+}
+.sidebar.mode-minimal > *:not(.mode-toggle) { display: none; }
+.sidebar.mode-minimal::before {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin: 0 auto;
+  background: #2a2a2a;
+}
+.sidebar.mode-minimal:hover::before { background: #4ec9b0; }
 .menu {
   position: fixed;
   z-index: 100;

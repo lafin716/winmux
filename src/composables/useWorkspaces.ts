@@ -3,11 +3,13 @@ import type { Workspace, WorkspaceStore, LayoutNode } from "../lib/layout-types"
 import { makeLeaf, nodeId } from "../lib/layout-types";
 import { loadWorkspaces, saveWorkspaces } from "../lib/persistence";
 
-function makeDefaultWorkspace(name = "Default", icon = "W"): Workspace {
+function makeDefaultWorkspace(name = "Default", icon = "W", index = 1): Workspace {
   return {
     id: nodeId("ws"),
     name,
     icon,
+    index,
+    nextSessionSeq: 1,
     layout: makeLeaf(nodeId("leaf")),
   };
 }
@@ -15,6 +17,14 @@ function makeDefaultWorkspace(name = "Default", icon = "W"): Workspace {
 function defaultStore(): WorkspaceStore {
   const ws = makeDefaultWorkspace();
   return { workspaces: [ws], activeWorkspaceId: ws.id };
+}
+
+function nextWorkspaceIndex(): number {
+  let max = 0;
+  for (const w of state.workspaces) {
+    if (typeof w.index === "number" && w.index > max) max = w.index;
+  }
+  return max + 1;
 }
 
 const state = reactive<WorkspaceStore>(defaultStore());
@@ -40,6 +50,15 @@ export function loadFromStorage() {
   loaded = true;
   const stored = loadWorkspaces();
   if (stored && stored.workspaces.length > 0) {
+    // Backfill missing index/nextSessionSeq from older persisted stores.
+    let usedMax = 0;
+    for (const w of stored.workspaces) {
+      if (typeof w.index === "number" && w.index > usedMax) usedMax = w.index;
+    }
+    for (const w of stored.workspaces) {
+      if (typeof w.index !== "number") w.index = ++usedMax;
+      if (typeof w.nextSessionSeq !== "number") w.nextSessionSeq = 1;
+    }
     state.workspaces = stored.workspaces;
     state.activeWorkspaceId =
       stored.workspaces.find((w) => w.id === stored.activeWorkspaceId)?.id ??
@@ -55,7 +74,7 @@ export function useWorkspaces() {
   );
 
   function createWorkspace(name = "Workspace", icon?: string): Workspace {
-    const ws = makeDefaultWorkspace(name, icon ?? name.slice(0, 1).toUpperCase());
+    const ws = makeDefaultWorkspace(name, icon ?? name.slice(0, 1).toUpperCase(), nextWorkspaceIndex());
     state.workspaces.push(ws);
     state.activeWorkspaceId = ws.id;
     return ws;

@@ -2,12 +2,15 @@
 import { ref, computed } from "vue";
 import type { LeafNode } from "../lib/layout-types";
 import TerminalView from "./Terminal.vue";
-import { useSessions } from "../composables/useSessions";
+import { useSessions, displayName } from "../composables/useSessions";
 import { useWorkspaces } from "../composables/useWorkspaces";
 import { useFocus } from "../composables/useFocus";
 import { useDragState } from "../composables/useDragState";
+import { useConfirm } from "../composables/useConfirm";
 import {
   computeDropZone,
+  leafCount,
+  MAX_PANES,
   moveTabToLeaf,
   moveTabAsSplit,
   moveTabToIndex,
@@ -20,15 +23,17 @@ const { state: sessState, kill, rename, create } = useSessions();
 const { activeWorkspace, replaceLayout } = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const drag = useDragState();
+const { confirm } = useConfirm();
 
 const editingId = ref<string | null>(null);
 const editValue = ref("");
-const bodyRef = ref<HTMLDivElement | null>(null);
+const catcherRef = ref<HTMLDivElement | null>(null);
 
 const isFocused = computed(() => focusedLeafId.value === props.leaf.id);
 
 function sessionName(id: string): string {
-  return sessState.sessions.find((s) => s.id === id)?.name ?? id.slice(0, 6);
+  const s = sessState.sessions.find((x) => x.id === id);
+  return s ? displayName(s.name) : id.slice(0, 6);
 }
 
 function selectTab(id: string) {
@@ -50,7 +55,12 @@ async function commitRename() {
 
 async function closeTab(id: string, ev: MouseEvent) {
   ev.stopPropagation();
-  if (confirm(`Kill session "${sessionName(id)}"?`)) {
+  const ok = await confirm({
+    message: `Kill session "${sessionName(id)}"?`,
+    confirmLabel: "Kill",
+    rememberKey: "skipKillSessionConfirm",
+  });
+  if (ok) {
     await kill(id);
   }
 }
@@ -68,24 +78,23 @@ function onTabDragEnd() {
   drag.reset();
 }
 
-function onBodyDragOver(ev: DragEvent) {
+function onCatcherDragOver(ev: DragEvent) {
   if (!drag.state.active) return;
   ev.preventDefault();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
-  if (!bodyRef.value) return;
-  const rect = bodyRef.value.getBoundingClientRect();
+  if (!catcherRef.value) return;
+  const rect = catcherRef.value.getBoundingClientRect();
   const zone = computeDropZone(ev.clientX, ev.clientY, rect);
   drag.setHover(props.leaf.id, zone);
 }
 
-function onBodyDragLeave(ev: DragEvent) {
-  // Only clear if leaving the leaf body entirely.
+function onCatcherDragLeave(ev: DragEvent) {
   const related = ev.relatedTarget as Node | null;
-  if (bodyRef.value && related && bodyRef.value.contains(related)) return;
+  if (catcherRef.value && related && catcherRef.value.contains(related)) return;
   if (drag.state.hoverLeafId === props.leaf.id) drag.setHover(null, null);
 }
 
-function onBodyDrop(ev: DragEvent) {
+function onCatcherDrop(ev: DragEvent) {
   if (!drag.state.active || !drag.state.sessionId) return;
   ev.preventDefault();
   const ws = activeWorkspace.value;
@@ -103,6 +112,14 @@ function onBodyDrop(ev: DragEvent) {
   } else {
     const split = zoneToSplit(zone);
     if (split) {
+      // Edge drop creates a new leaf. Net delta is +1 only if the source leaf survives
+      // (has other tabs); otherwise it collapses away.
+      const willGainLeaf = sourceSurvivesAfterMove(ws.layout, sessionId);
+      if (willGainLeaf && leafCount(ws.layout) >= MAX_PANES) {
+        alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
+        drag.reset();
+        return;
+      }
       const newRoot = moveTabAsSplit(
         ws.layout,
         sessionId,
@@ -115,6 +132,18 @@ function onBodyDrop(ev: DragEvent) {
   }
   setFocusedLeaf(findLeafIdOfSession(ws, sessionId) ?? props.leaf.id);
   drag.reset();
+}
+
+function sourceSurvivesAfterMove(root: any, sessionId: string): boolean {
+  const stack: any[] = [root];
+  while (stack.length) {
+    const n = stack.pop();
+    if (n.kind === "leaf" && n.tabs.includes(sessionId)) {
+      return n.tabs.length > 1;
+    }
+    if (n.kind === "split") stack.push(...n.children);
+  }
+  return false;
 }
 
 function findLeafIdOfSession(ws: any, sessionId: string): string | null {
@@ -156,10 +185,6 @@ async function onAddClick(ev: MouseEvent) {
   setFocusedLeaf(props.leaf.id);
   await create();
 }
-
-const showOverlay = computed(
-  () => drag.state.active && drag.state.hoverLeafId === props.leaf.id,
-);
 </script>
 
 <template>
@@ -205,22 +230,30 @@ const showOverlay = computed(
       <div class="tab-bar-spacer" />
     </div>
 
-    <div
-      ref="bodyRef"
-      class="body"
-      @dragover="onBodyDragOver"
-      @dragleave="onBodyDragLeave"
-      @drop="onBodyDrop"
-    >
+    <div class="body">
       <TerminalView
         v-if="leaf.activeTabId"
         :key="leaf.activeTabId"
         :session-id="leaf.activeTabId"
-        :active="true"
+        :active="isFocused"
       />
       <div v-else class="empty">No session in this pane.</div>
 
-      <div v-if="showOverlay" class="overlay" :class="['zone-' + drag.state.hoverZone]" />
+      <div
+        v-if="drag.state.active"
+        ref="catcherRef"
+        class="drop-catcher"
+        @dragenter.prevent
+        @dragover="onCatcherDragOver"
+        @dragleave="onCatcherDragLeave"
+        @drop="onCatcherDrop"
+      >
+        <div
+          v-if="drag.state.hoverLeafId === leaf.id && drag.state.hoverZone"
+          class="overlay"
+          :class="['zone-' + drag.state.hoverZone]"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -322,10 +355,15 @@ input {
   color: #666;
   font-size: 12px;
 }
+.drop-catcher {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+}
 .overlay {
   position: absolute;
-  background: rgba(78, 201, 176, 0.18);
-  border: 1px solid #4ec9b0;
+  background: rgba(78, 201, 176, 0.22);
+  border: 2px solid #4ec9b0;
   pointer-events: none;
   transition: all 80ms ease;
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { useSessions } from "../composables/useSessions";
+import { useSessions, displayName } from "../composables/useSessions";
 import { useWorkspaces } from "../composables/useWorkspaces";
 
-const { state, focusedSession } = useSessions();
+const { workspaceSessions, focusedSession } = useSessions();
 const { activeWorkspace } = useWorkspaces();
 const time = ref(formatNow());
 let timer: number | null = null;
@@ -11,6 +11,12 @@ let timer: number | null = null;
 function formatNow() {
   const d = new Date();
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function sessionLabel(i: number): string {
+  if (i < 9) return String(i + 1);
+  if (i < 15) return String.fromCharCode(65 + (i - 9));
+  return String(i + 1);
 }
 
 onMounted(() => {
@@ -29,12 +35,12 @@ onUnmounted(() => {
     <div class="left">
       <span class="badge">[winmux]</span>
       <span v-if="activeWorkspace" class="ws">{{ activeWorkspace.name }}</span>
-      <span v-if="focusedSession">/ {{ focusedSession.name }}</span>
+      <span v-if="focusedSession">/ {{ displayName(focusedSession.name) }}</span>
     </div>
     <div class="center">
-      <span v-for="(s, i) in state.sessions" :key="s.id"
+      <span v-for="(s, i) in workspaceSessions" :key="s.id"
             :class="['win', { active: focusedSession?.id === s.id }]">
-        {{ i }}:{{ s.name }}
+        {{ sessionLabel(i) }}:{{ displayName(s.name) }}
       </span>
     </div>
     <div class="right">
