@@ -1,32 +1,55 @@
 import { reactive, computed } from "vue";
 import { api, type SessionInfo } from "../lib/tauri";
+import { useWorkspaces } from "./useWorkspaces";
+import { useFocus } from "./useFocus";
+import {
+  addTabToLeaf,
+  findFirstLeaf,
+  findLeafById,
+  findLeafBySession,
+  removeTab,
+} from "./useLayout";
 
 interface Store {
   sessions: SessionInfo[];
-  activeId: string | null;
 }
 
 const state = reactive<Store>({
   sessions: [],
-  activeId: null,
 });
 
 export function useSessions() {
-  const active = computed(() =>
-    state.sessions.find((s) => s.id === state.activeId) ?? null,
-  );
+  const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
+  const { focusedLeafId, setFocusedLeaf } = useFocus();
+
+  function getById(id: string): SessionInfo | undefined {
+    return state.sessions.find((s) => s.id === id);
+  }
+
+  const focusedSession = computed<SessionInfo | null>(() => {
+    const ws = activeWorkspace.value;
+    if (!ws || !focusedLeafId.value) return null;
+    const leaf = findLeafById(ws.layout, focusedLeafId.value);
+    if (!leaf || !leaf.activeTabId) return null;
+    return getById(leaf.activeTabId) ?? null;
+  });
 
   async function refresh() {
     state.sessions = await api.listSessions();
-    if (state.activeId && !state.sessions.find((s) => s.id === state.activeId)) {
-      state.activeId = state.sessions[0]?.id ?? null;
-    }
   }
 
   async function create(opts: { name?: string; shell?: string } = {}) {
     const info = await api.createSession(opts);
     state.sessions.push(info);
-    state.activeId = info.id;
+    const ws = activeWorkspace.value;
+    if (ws) {
+      const targetLeafId =
+        focusedLeafId.value && findLeafById(ws.layout, focusedLeafId.value)
+          ? focusedLeafId.value
+          : findFirstLeaf(ws.layout).id;
+      addTabToLeaf(ws.layout, targetLeafId, info.id);
+      setFocusedLeaf(targetLeafId);
+    }
     return info;
   }
 
@@ -34,32 +57,12 @@ export function useSessions() {
     await api.killSession(id);
     const idx = state.sessions.findIndex((s) => s.id === id);
     if (idx >= 0) state.sessions.splice(idx, 1);
-    if (state.activeId === id) {
-      state.activeId = state.sessions[0]?.id ?? null;
+    for (const ws of wsState.workspaces) {
+      if (findLeafBySession(ws.layout, id)) {
+        const { root } = removeTab(ws.layout, id);
+        if (root !== ws.layout) replaceLayout(ws.id, root);
+      }
     }
-  }
-
-  function setActive(id: string) {
-    if (state.sessions.find((s) => s.id === id)) state.activeId = id;
-  }
-
-  function next() {
-    if (state.sessions.length < 2 || !state.activeId) return;
-    const idx = state.sessions.findIndex((s) => s.id === state.activeId);
-    const n = state.sessions[(idx + 1) % state.sessions.length];
-    state.activeId = n.id;
-  }
-
-  function prev() {
-    if (state.sessions.length < 2 || !state.activeId) return;
-    const idx = state.sessions.findIndex((s) => s.id === state.activeId);
-    const n = state.sessions[(idx - 1 + state.sessions.length) % state.sessions.length];
-    state.activeId = n.id;
-  }
-
-  function selectByIndex(i: number) {
-    const s = state.sessions[i];
-    if (s) state.activeId = s.id;
   }
 
   async function rename(id: string, name: string) {
@@ -70,14 +73,11 @@ export function useSessions() {
 
   return {
     state,
-    active,
+    focusedSession,
     refresh,
     create,
     kill,
-    setActive,
-    next,
-    prev,
-    selectByIndex,
     rename,
+    getById,
   };
 }

@@ -1,56 +1,91 @@
 <script setup lang="ts">
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { onMounted } from "vue";
-import TabBar from "./components/TabBar.vue";
+import SideBar from "./components/SideBar.vue";
 import StatusBar from "./components/StatusBar.vue";
-import TerminalView from "./components/Terminal.vue";
+import SplitContainer from "./components/SplitContainer.vue";
+import MenuBar from "./components/MenuBar.vue";
+import SettingsModal from "./components/SettingsModal.vue";
+import { api } from "./lib/tauri";
 import { useSessions } from "./composables/useSessions";
+import { useWorkspaces, loadFromStorage } from "./composables/useWorkspaces";
+import { useFocus } from "./composables/useFocus";
 import { usePrefixKey } from "./composables/usePrefixKey";
+import { useKeybindings, loadKeybindingsFromStorage } from "./composables/useKeybindings";
+import { useGlobalShortcuts, registerAction } from "./composables/useGlobalShortcuts";
+import { useSettings } from "./composables/useSettings";
+import { ACTIONS, type ActionId } from "./lib/keybindings";
+import {
+  addTabToLeaf,
+  collectAllLeaves,
+  collectAllSessionIds,
+  findFirstLeaf,
+  findLeafById,
+  pruneMissing,
+  splitLeaf,
+} from "./composables/useLayout";
 
-type TerminalRef = InstanceType<typeof TerminalView> & {
-  focus: () => void;
-  fit: () => void;
-  reset: () => void;
-};
-
-const termRefs = new Map<string, TerminalRef>();
-function setTermRef(id: string, el: unknown) {
-  if (el) termRefs.set(id, el as TerminalRef);
-  else termRefs.delete(id);
-}
-
-const {
-  state,
-  active,
-  refresh,
-  create,
-  kill,
-  next,
-  prev,
-  selectByIndex,
-  rename,
-} = useSessions();
+const { state: sessState, refresh, create, kill, focusedSession, rename } = useSessions();
+const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
+const { focusedLeafId, setFocusedLeaf } = useFocus();
+const { settingsOpen, openSettings } = useSettings();
+const { prefixFor } = useKeybindings();
+useGlobalShortcuts();
 
 async function bootstrap() {
+  loadKeybindingsFromStorage();
+  loadFromStorage();
   await refresh();
-  if (state.sessions.length === 0) {
+
+  // Prune missing sessions from every workspace layout.
+  const validIds = new Set(sessState.sessions.map((s) => s.id));
+  for (const ws of wsState.workspaces) {
+    const newRoot = pruneMissing(ws.layout, validIds);
+    if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
+  }
+
+  // Attach orphan sessions (in daemon but not in any layout) to the active workspace's first leaf.
+  const placed = new Set<string>();
+  for (const ws of wsState.workspaces) {
+    for (const sid of collectAllSessionIds(ws.layout)) placed.add(sid);
+  }
+  const ws = activeWorkspace.value;
+  if (ws) {
+    const leaf = findFirstLeaf(ws.layout);
+    for (const s of sessState.sessions) {
+      if (!placed.has(s.id)) addTabToLeaf(ws.layout, leaf.id, s.id);
+    }
+    // Set initial focus to the first non-empty leaf with an active tab.
+    const firstLeafWithTabs = collectAllLeaves(ws.layout).find((l) => l.tabs.length > 0);
+    if (firstLeafWithTabs) {
+      setFocusedLeaf(firstLeafWithTabs.id);
+      if (!firstLeafWithTabs.activeTabId) {
+        firstLeafWithTabs.activeTabId = firstLeafWithTabs.tabs[0];
+      }
+    } else {
+      setFocusedLeaf(leaf.id);
+    }
+  }
+
+  // Ensure at least one session exists.
+  if (sessState.sessions.length === 0) {
     await create();
-  } else if (!state.activeId) {
-    state.activeId = state.sessions[0].id;
   }
 }
 
 async function promptRename() {
-  if (!active.value) return;
-  const name = window.prompt("Rename session", active.value.name);
-  if (name && name.trim()) await rename(active.value.id, name.trim());
+  const s = focusedSession.value;
+  if (!s) return;
+  const name = window.prompt("Rename session", s.name);
+  if (name && name.trim()) await rename(s.id, name.trim());
 }
 
-async function killActive() {
-  if (!active.value) return;
-  if (confirm(`Kill session "${active.value.name}"?`)) {
-    await kill(active.value.id);
-    if (state.sessions.length === 0) await create();
+async function killFocused() {
+  const s = focusedSession.value;
+  if (!s) return;
+  if (confirm(`Kill session "${s.name}"?`)) {
+    await kill(s.id);
+    if (sessState.sessions.length === 0) await create();
   }
 }
 
@@ -59,31 +94,63 @@ async function detach() {
   await w.hide();
 }
 
+function cycleInLeaf(delta: number) {
+  const ws = activeWorkspace.value;
+  if (!ws || !focusedLeafId.value) return;
+  const leaf = findLeafById(ws.layout, focusedLeafId.value);
+  if (!leaf || leaf.tabs.length < 2 || !leaf.activeTabId) return;
+  const idx = leaf.tabs.indexOf(leaf.activeTabId);
+  const n = leaf.tabs[(idx + delta + leaf.tabs.length) % leaf.tabs.length];
+  leaf.activeTabId = n;
+}
+
+function selectByIndexInLeaf(i: number) {
+  const ws = activeWorkspace.value;
+  if (!ws || !focusedLeafId.value) return;
+  const leaf = findLeafById(ws.layout, focusedLeafId.value);
+  if (!leaf) return;
+  const tab = leaf.tabs[i];
+  if (tab) leaf.activeTabId = tab;
+}
+
+async function splitAndCreate(direction: "horizontal" | "vertical") {
+  const ws = activeWorkspace.value;
+  if (!ws || !focusedLeafId.value) return;
+  const info = await api.createSession({});
+  sessState.sessions.push(info);
+  const newRoot = splitLeaf(ws.layout, focusedLeafId.value, info.id, direction, "after");
+  if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
+}
+
+const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
+  "session.new": async () => { await create(); },
+  "session.kill": () => killFocused(),
+  "session.rename": () => promptRename(),
+  "session.cycleNext": () => cycleInLeaf(1),
+  "session.cyclePrev": () => cycleInLeaf(-1),
+  "pane.splitHorizontal": () => splitAndCreate("horizontal"),
+  "pane.splitVertical": () => splitAndCreate("vertical"),
+  "window.detach": () => detach(),
+  "settings.open": () => openSettings(),
+};
+
+for (const a of ACTIONS) {
+  const h = ACTION_HANDLERS[a.id as ActionId];
+  if (h) registerAction(a.id as ActionId, h);
+}
+
 usePrefixKey(async (key) => {
-  switch (key) {
-    case "c":
-      await create();
-      break;
-    case "n":
-      next();
-      break;
-    case "p":
-      prev();
-      break;
-    case ",":
-      await promptRename();
-      break;
-    case "&":
-      await killActive();
-      break;
-    case "d":
-      await detach();
-      break;
-    case "r":
-      if (active.value) termRefs.get(active.value.id)?.reset();
-      break;
-    default:
-      if (/^[0-9]$/.test(key)) selectByIndex(parseInt(key, 10));
+  // Numeric tab selection is hard-wired (not a configurable action).
+  if (/^[0-9]$/.test(key)) {
+    selectByIndexInLeaf(parseInt(key, 10));
+    return;
+  }
+  for (const a of ACTIONS) {
+    if (prefixFor(a.id as ActionId) === key) {
+      const h = ACTION_HANDLERS[a.id as ActionId];
+      if (h) await h();
+      return;
+    }
   }
 });
 
@@ -92,21 +159,15 @@ onMounted(bootstrap);
 
 <template>
   <div class="app">
-    <TabBar />
-    <div class="terminals">
-      <TerminalView
-        v-for="s in state.sessions"
-        :key="s.id"
-        :ref="(el) => setTermRef(s.id, el)"
-        :session-id="s.id"
-        :active="s.id === state.activeId"
-        v-show="s.id === state.activeId"
-      />
-      <div v-if="state.sessions.length === 0" class="empty">
-        No sessions. Press <kbd>Ctrl+B</kbd> then <kbd>c</kbd> to create one.
+    <MenuBar />
+    <div class="main">
+      <SideBar />
+      <div class="content">
+        <SplitContainer v-if="activeWorkspace" :key="activeWorkspace.id" :node="activeWorkspace.layout" />
       </div>
     </div>
     <StatusBar />
+    <SettingsModal v-if="settingsOpen" />
   </div>
 </template>
 
@@ -130,28 +191,16 @@ html, body, #app {
   height: 100vh;
   width: 100vw;
 }
-.terminals {
-  flex: 1;
-  position: relative;
-  min-height: 0;
-  background: #1e1e1e;
-}
-.terminals > :deep(.term-host) {
-  position: absolute;
-  inset: 0;
-}
-.empty {
+.main {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #888;
+  flex: 1;
+  min-height: 0;
 }
-kbd {
-  background: #2e2e2e;
-  border: 1px solid #444;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-family: Consolas, monospace;
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: #1e1e1e;
 }
 </style>

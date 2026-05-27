@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { useSessions } from "../composables/useSessions";
+import { useWorkspaces } from "../composables/useWorkspaces";
 
-const { state, active } = useSessions();
+const { state, focusedSession } = useSessions();
+const { activeWorkspace } = useWorkspaces();
 const time = ref(formatNow());
 let timer: number | null = null;
 
@@ -26,11 +28,12 @@ onUnmounted(() => {
   <div class="status-bar">
     <div class="left">
       <span class="badge">[winmux]</span>
-      <span v-if="active">{{ active.name }}</span>
+      <span v-if="activeWorkspace" class="ws">{{ activeWorkspace.name }}</span>
+      <span v-if="focusedSession">/ {{ focusedSession.name }}</span>
     </div>
     <div class="center">
       <span v-for="(s, i) in state.sessions" :key="s.id"
-            :class="['win', { active: s.id === state.activeId }]">
+            :class="['win', { active: focusedSession?.id === s.id }]">
         {{ i }}:{{ s.name }}
       </span>
     </div>
@@ -68,9 +71,8 @@ onUnmounted(() => {
 .badge {
   font-weight: bold;
 }
-.win {
-  opacity: 0.7;
-}
+.ws { font-weight: 600; }
+.win { opacity: 0.7; }
 .win.active {
   background: #1a1a1a;
   color: #4ec9b0;
