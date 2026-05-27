@@ -4,6 +4,7 @@ import type { Keybinding } from "./keybindings";
 const STORAGE_KEY = "winmux:workspaces:v1";
 const KEYBINDINGS_KEY = "winmux:keybindings:v1";
 const PREFS_KEY = "winmux:prefs:v1";
+const PALETTE_KEY = "winmux:palette:v1";
 
 interface Persisted {
   version: 1;
@@ -90,5 +91,39 @@ export function savePrefs(prefs: Prefs): void {
     localStorage.setItem(PREFS_KEY, JSON.stringify(payload));
   } catch (e) {
     console.warn("savePrefs failed", e);
+  }
+}
+
+export interface PaletteItem {
+  id: string;
+  label: string;
+  command: string;
+  autoRun: boolean;
+}
+
+interface PersistedPalette {
+  version: 1;
+  items: PaletteItem[];
+}
+
+export function loadPaletteItems(): PaletteItem[] | null {
+  try {
+    const raw = localStorage.getItem(PALETTE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedPalette;
+    if (parsed.version !== 1 || !Array.isArray(parsed.items)) return null;
+    return parsed.items;
+  } catch (e) {
+    console.warn("loadPaletteItems failed", e);
+    return null;
+  }
+}
+
+export function savePaletteItems(items: PaletteItem[]): void {
+  try {
+    const payload: PersistedPalette = { version: 1, items };
+    localStorage.setItem(PALETTE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn("savePaletteItems failed", e);
   }
 }

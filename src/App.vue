@@ -7,6 +7,7 @@ import SplitContainer from "./components/SplitContainer.vue";
 import MenuBar from "./components/MenuBar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import ConfirmModal from "./components/ConfirmModal.vue";
+import PalettePopover from "./components/PalettePopover.vue";
 import { api } from "./lib/tauri";
 import { useSessions, nextDaemonName, displayName } from "./composables/useSessions";
 import { useWorkspaces, loadFromStorage } from "./composables/useWorkspaces";
@@ -17,6 +18,7 @@ import { useGlobalShortcuts, registerAction, registerFocusSessionByIndex } from 
 import { useSettings } from "./composables/useSettings";
 import { useConfirm } from "./composables/useConfirm";
 import { loadPrefsFromStorage, cycleSidebarMode } from "./composables/usePrefs";
+import { loadPaletteFromStorage } from "./composables/usePalette";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
   addTabToLeaf,
@@ -45,6 +47,7 @@ useGlobalShortcuts();
 async function bootstrap() {
   loadPrefsFromStorage();
   loadKeybindingsFromStorage();
+  loadPaletteFromStorage();
   loadFromStorage();
   await refresh();
 
@@ -279,6 +282,7 @@ onMounted(bootstrap);
     <StatusBar />
     <SettingsModal v-if="settingsOpen" />
     <ConfirmModal />
+    <PalettePopover />
   </div>
 </template>
 

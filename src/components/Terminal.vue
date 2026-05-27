@@ -12,6 +12,7 @@ import {
   type PtyOutputPayload,
 } from "../lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { openPalette } from "../composables/usePalette";
 
 const props = defineProps<{
   sessionId: string;
@@ -105,7 +106,23 @@ async function init() {
   resizeObserver = new ResizeObserver(() => safeFit());
   resizeObserver.observe(host.value);
 
+  host.value.addEventListener("mousedown", onHostMouseDown, { capture: true });
+  host.value.addEventListener("auxclick", onHostAuxClick, { capture: true });
+
   if (props.active) term.focus();
+}
+
+function onHostMouseDown(ev: MouseEvent) {
+  if (ev.button !== 1) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  openPalette(ev.clientX, ev.clientY, props.sessionId);
+}
+
+function onHostAuxClick(ev: MouseEvent) {
+  if (ev.button !== 1) return;
+  ev.preventDefault();
+  ev.stopPropagation();
 }
 
 function safeFit() {
@@ -138,6 +155,10 @@ onMounted(init);
 onBeforeUnmount(() => {
   if (unlistenOutput) unlistenOutput();
   if (resizeObserver) resizeObserver.disconnect();
+  if (host.value) {
+    host.value.removeEventListener("mousedown", onHostMouseDown, { capture: true });
+    host.value.removeEventListener("auxclick", onHostAuxClick, { capture: true });
+  }
   term?.dispose();
 });
 

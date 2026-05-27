@@ -9,12 +9,24 @@ import {
   type ActionId,
   type Keybinding,
 } from "../lib/keybindings";
+import {
+  usePalette,
+  addPaletteItem,
+  updatePaletteItem,
+  removePaletteItem,
+} from "../composables/usePalette";
 
 const { closeSettings } = useSettings();
 const { actions, bindingFor, prefixFor, setBinding, resetBinding, resetAll, isOverridden } =
   useKeybindings();
+const { items: paletteItems } = usePalette();
 
-const activeCategory = ref<"keybindings">("keybindings");
+type Category = "keybindings" | "palette";
+const activeCategory = ref<Category>("keybindings");
+
+function addPaletteRow() {
+  addPaletteItem({ label: "New item", command: "", autoRun: false });
+}
 const capturingId = ref<ActionId | null>(null);
 
 function startCapture(id: ActionId) {
@@ -115,6 +127,12 @@ void sameBinding;
           >
             Keybindings
           </div>
+          <div
+            :class="['cat', { active: activeCategory === 'palette' }]"
+            @click="activeCategory = 'palette'"
+          >
+            Palette
+          </div>
         </aside>
         <section class="panel">
           <div v-if="activeCategory === 'keybindings'" class="kb">
@@ -165,6 +183,49 @@ void sameBinding;
             </div>
             <div v-if="conflicts.size > 0" class="warn">
               ⚠ Conflicting shortcuts detected. Only one action will be triggered per keystroke.
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'palette'" class="palette">
+            <div class="kb-header">
+              <div class="hint">
+                Items appear in the radial menu opened by middle-clicking inside a terminal. "Auto-run" appends Enter; otherwise the command is pasted at the prompt.
+              </div>
+              <button class="reset-all" @click="addPaletteRow">+ Add item</button>
+            </div>
+            <div class="table">
+              <div class="row pal head">
+                <div>Label</div>
+                <div>Command</div>
+                <div>Auto-run</div>
+                <div></div>
+              </div>
+              <div v-for="it in paletteItems" :key="it.id" class="row pal">
+                <input
+                  class="pal-input"
+                  :value="it.label"
+                  maxlength="40"
+                  @input="updatePaletteItem(it.id, { label: ($event.target as HTMLInputElement).value })"
+                />
+                <input
+                  class="pal-input mono"
+                  :value="it.command"
+                  @input="updatePaletteItem(it.id, { command: ($event.target as HTMLInputElement).value })"
+                />
+                <label class="pal-check">
+                  <input
+                    type="checkbox"
+                    :checked="it.autoRun"
+                    @change="updatePaletteItem(it.id, { autoRun: ($event.target as HTMLInputElement).checked })"
+                  />
+                </label>
+                <div class="c-actions">
+                  <button class="btn" @click="removePaletteItem(it.id)">Remove</button>
+                </div>
+              </div>
+              <div v-if="paletteItems.length === 0" class="empty">
+                No custom items yet. Click <b>+ Add item</b> to create one.
+              </div>
             </div>
           </div>
         </section>
@@ -320,5 +381,34 @@ void sameBinding;
   color: #e88;
   border-radius: 4px;
   font-size: 12px;
+}
+.row.pal {
+  grid-template-columns: 1fr 1.4fr 80px 100px;
+}
+.pal-input {
+  background: #252525;
+  color: #e6e6e6;
+  border: 1px solid #2a2a2a;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font: inherit;
+}
+.pal-input.mono {
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+.pal-input:focus {
+  outline: none;
+  border-color: #4ec9b0;
+}
+.pal-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.empty {
+  padding: 16px 6px;
+  color: #777;
+  font-size: 12px;
+  text-align: center;
 }
 </style>
