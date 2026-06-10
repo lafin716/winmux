@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { open } from "@tauri-apps/plugin-dialog";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useSettings } from "../composables/useSettings";
 import { useKeybindings } from "../composables/useKeybindings";
+import { useWorkspaces } from "../composables/useWorkspaces";
 import {
   captureKeybinding,
   formatKeybinding,
@@ -20,12 +22,32 @@ const { closeSettings } = useSettings();
 const { actions, bindingFor, prefixFor, setBinding, resetBinding, resetAll, isOverridden } =
   useKeybindings();
 const { items: paletteItems } = usePalette();
+const { state: workspaceState, activeWorkspace, updateWorkspaceSettings } = useWorkspaces();
 
-type Category = "keybindings" | "palette";
-const activeCategory = ref<Category>("keybindings");
+type Category = "workspaces" | "keybindings" | "palette";
+const activeCategory = ref<Category>("workspaces");
 
 function addPaletteRow() {
   addPaletteItem({ label: "New item", command: "", autoRun: false });
+}
+
+function updateDefaultCwd(id: string, value: string) {
+  updateWorkspaceSettings(id, { defaultCwd: value });
+}
+
+function clearDefaultCwd(id: string) {
+  updateWorkspaceSettings(id, { defaultCwd: "" });
+}
+
+async function chooseDefaultCwd(id: string) {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: "Select default folder",
+  });
+  if (typeof selected === "string") {
+    updateWorkspaceSettings(id, { defaultCwd: selected });
+  }
 }
 const capturingId = ref<ActionId | null>(null);
 
@@ -122,6 +144,12 @@ void sameBinding;
       <div class="body">
         <aside class="cats">
           <div
+            :class="['cat', { active: activeCategory === 'workspaces' }]"
+            @click="activeCategory = 'workspaces'"
+          >
+            Workspaces
+          </div>
+          <div
             :class="['cat', { active: activeCategory === 'keybindings' }]"
             @click="activeCategory = 'keybindings'"
           >
@@ -135,7 +163,42 @@ void sameBinding;
           </div>
         </aside>
         <section class="panel">
-          <div v-if="activeCategory === 'keybindings'" class="kb">
+          <div v-if="activeCategory === 'workspaces'" class="workspaces">
+            <div class="kb-header">
+              <div class="hint">
+                Set a default folder per workspace. New terminals and splits start in that folder.
+              </div>
+            </div>
+            <div class="table">
+              <div class="row ws-head">
+                <div>Workspace</div>
+                <div>Default folder</div>
+                <div></div>
+              </div>
+              <div v-for="ws in workspaceState.workspaces" :key="ws.id" class="row ws-settings">
+                <div class="ws-title">
+                  <span class="ws-icon">{{ ws.icon || ws.name.slice(0, 1).toUpperCase() }}</span>
+                  <span>{{ ws.name }}</span>
+                  <span v-if="ws.id === activeWorkspace?.id" class="active-tag">Active</span>
+                </div>
+                <input
+                  class="path-input"
+                  :value="ws.settings?.defaultCwd ?? ''"
+                  placeholder="e.g. C:\playground\project"
+                  @input="updateDefaultCwd(ws.id, ($event.target as HTMLInputElement).value)"
+                />
+                <div class="c-actions">
+                  <button class="btn" @click="chooseDefaultCwd(ws.id)">Browse</button>
+                  <button class="btn" @click="clearDefaultCwd(ws.id)">Clear</button>
+                </div>
+              </div>
+            </div>
+            <div class="note">
+              Empty means winmux uses the shell/daemon default directory.
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'keybindings'" class="kb">
             <div class="kb-header">
               <div class="hint">
                 Click on a key cell to record a new shortcut. Prefix shortcuts (Ctrl+B …) are fixed in this version.
@@ -384,6 +447,56 @@ void sameBinding;
 }
 .row.pal {
   grid-template-columns: 1fr 1.4fr 80px 100px;
+}
+.row.ws-head,
+.row.ws-settings {
+  grid-template-columns: 140px 1fr 130px;
+}
+.ws-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.ws-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: #2a2a2a;
+  color: #4ec9b0;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.active-tag {
+  color: #4ec9b0;
+  background: rgba(78, 201, 176, 0.12);
+  border: 1px solid rgba(78, 201, 176, 0.25);
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+.path-input {
+  background: #252525;
+  color: #e6e6e6;
+  border: 1px solid #2a2a2a;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font: inherit;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  min-width: 0;
+}
+.path-input:focus {
+  outline: none;
+  border-color: #4ec9b0;
+}
+.note {
+  margin-top: 10px;
+  color: #888;
+  font-size: 12px;
 }
 .pal-input {
   background: #252525;

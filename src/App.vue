@@ -10,7 +10,7 @@ import ConfirmModal from "./components/ConfirmModal.vue";
 import PalettePopover from "./components/PalettePopover.vue";
 import { api } from "./lib/tauri";
 import { useSessions, nextDaemonName, displayName } from "./composables/useSessions";
-import { useWorkspaces, loadFromStorage } from "./composables/useWorkspaces";
+import { useWorkspaces, loadFromStorage, workspaceDefaultCwd } from "./composables/useWorkspaces";
 import { useFocus } from "./composables/useFocus";
 import { usePrefixKey } from "./composables/usePrefixKey";
 import { useKeybindings, loadKeybindingsFromStorage } from "./composables/useKeybindings";
@@ -146,7 +146,10 @@ async function splitAndCreate(direction: "horizontal" | "vertical") {
     alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
     return;
   }
-  const info = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+  const info = await api.createSession({
+    name: nextDaemonName(ws, sessState.sessions),
+    cwd: workspaceDefaultCwd(ws),
+  });
   sessState.sessions.push(info);
   const newRoot = splitLeaf(ws.layout, focusedLeafId.value, info.id, direction, "after");
   if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
@@ -184,7 +187,10 @@ async function splitOrMove(dir: "left" | "right" | "up" | "down") {
     }
     const direction = (dir === "left" || dir === "right") ? "horizontal" : "vertical";
     const position = (dir === "left" || dir === "up") ? "before" : "after";
-    const info = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+    const info = await api.createSession({
+      name: nextDaemonName(ws, sessState.sessions),
+      cwd: workspaceDefaultCwd(ws),
+    });
     sessState.sessions.push(info);
     const newRoot = splitLeaf(ws.layout, cur.id, info.id, direction, position);
     if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
@@ -200,9 +206,15 @@ async function quadrantSplit(corner: "tl" | "tr" | "bl" | "br") {
     alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
     return;
   }
-  const a = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+  const a = await api.createSession({
+    name: nextDaemonName(ws, sessState.sessions),
+    cwd: workspaceDefaultCwd(ws),
+  });
   sessState.sessions.push(a);
-  const b = await api.createSession({ name: nextDaemonName(ws, sessState.sessions) });
+  const b = await api.createSession({
+    name: nextDaemonName(ws, sessState.sessions),
+    cwd: workspaceDefaultCwd(ws),
+  });
   sessState.sessions.push(b);
   const newRoot = quadrantSplitLeaf(ws.layout, focusedLeafId.value, a.id, b.id, corner);
   if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);

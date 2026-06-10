@@ -17,6 +17,11 @@ export interface SplitNode {
 
 export type LayoutNode = LeafNode | SplitNode;
 
+export interface WorkspaceSettings {
+  // Optional default working directory for new sessions in this workspace.
+  defaultCwd: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -27,6 +32,7 @@ export interface Workspace {
   // Deprecated — session-number allocation is now derived from live session names.
   // Field is retained for back-compat with persisted stores.
   nextSessionSeq: number;
+  settings: WorkspaceSettings;
   layout: LayoutNode;
 }
 

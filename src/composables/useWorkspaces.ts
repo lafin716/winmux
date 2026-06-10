@@ -1,7 +1,13 @@
 import { reactive, computed, watch } from "vue";
-import type { Workspace, WorkspaceStore, LayoutNode } from "../lib/layout-types";
+import type { Workspace, WorkspaceStore, LayoutNode, WorkspaceSettings } from "../lib/layout-types";
 import { makeLeaf, nodeId } from "../lib/layout-types";
 import { loadWorkspaces, saveWorkspaces } from "../lib/persistence";
+
+function defaultWorkspaceSettings(): WorkspaceSettings {
+  return {
+    defaultCwd: "",
+  };
+}
 
 function makeDefaultWorkspace(name = "Default", icon = "W", index = 1): Workspace {
   return {
@@ -10,7 +16,17 @@ function makeDefaultWorkspace(name = "Default", icon = "W", index = 1): Workspac
     icon,
     index,
     nextSessionSeq: 1,
+    settings: defaultWorkspaceSettings(),
     layout: makeLeaf(nodeId("leaf")),
+  };
+}
+
+function backfillWorkspace(ws: Workspace) {
+  if (typeof ws.index !== "number") return;
+  if (typeof ws.nextSessionSeq !== "number") ws.nextSessionSeq = 1;
+  ws.settings = {
+    ...defaultWorkspaceSettings(),
+    ...(ws.settings ?? {}),
   };
 }
 
@@ -57,7 +73,7 @@ export function loadFromStorage() {
     }
     for (const w of stored.workspaces) {
       if (typeof w.index !== "number") w.index = ++usedMax;
-      if (typeof w.nextSessionSeq !== "number") w.nextSessionSeq = 1;
+      backfillWorkspace(w);
     }
     state.workspaces = stored.workspaces;
     state.activeWorkspaceId =
@@ -111,6 +127,16 @@ export function useWorkspaces() {
     if (ws) ws.layout = layout;
   }
 
+  function updateWorkspaceSettings(id: string, patch: Partial<WorkspaceSettings>) {
+    const ws = state.workspaces.find((w) => w.id === id);
+    if (!ws) return;
+    ws.settings = {
+      ...defaultWorkspaceSettings(),
+      ...(ws.settings ?? {}),
+      ...patch,
+    };
+  }
+
   return {
     state,
     activeWorkspace,
@@ -119,5 +145,11 @@ export function useWorkspaces() {
     renameWorkspace,
     setActiveWorkspace,
     replaceLayout,
+    updateWorkspaceSettings,
   };
+}
+
+export function workspaceDefaultCwd(ws: Workspace | null | undefined): string | undefined {
+  const cwd = ws?.settings?.defaultCwd?.trim();
+  return cwd ? cwd : undefined;
 }

@@ -7,6 +7,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::broadcast;
@@ -37,6 +38,7 @@ pub fn spawn_session(
     events: broadcast::Sender<Event>,
     name: String,
     shell: String,
+    cwd: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<Session> {
@@ -50,7 +52,13 @@ pub fn spawn_session(
         })
         .map_err(|e| anyhow!("openpty failed: {e}"))?;
 
-    let cmd = CommandBuilder::new(&shell);
+    let mut cmd = CommandBuilder::new(&shell);
+    if let Some(cwd) = cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if !Path::new(cwd).is_dir() {
+            return Err(anyhow!("working directory does not exist: {cwd}"));
+        }
+        cmd.cwd(cwd);
+    }
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -88,12 +96,8 @@ pub fn spawn_session(
                                 sb.pop_front();
                             }
                         }
-                        let encoded =
-                            base64::engine::general_purpose::STANDARD.encode(chunk);
-                        let _ = events_clone.send(Event::PtyOutput {
-                            id,
-                            data: encoded,
-                        });
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
+                        let _ = events_clone.send(Event::PtyOutput { id, data: encoded });
                     }
                     Err(_) => break,
                 }

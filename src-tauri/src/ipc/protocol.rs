@@ -17,6 +17,8 @@ pub enum Method {
     CreateSession {
         name: Option<String>,
         shell: Option<String>,
+        #[serde(default)]
+        cwd: Option<String>,
         cols: u16,
         rows: u16,
     },

@@ -40,7 +40,9 @@ pub async fn run_server(state: Arc<DaemonState>) -> Result<()> {
     let first = ServerOptions::new()
         .first_pipe_instance(true)
         .create(&name)
-        .map_err(|e| anyhow!("failed to bind named pipe {name}: {e} (another daemon already running?)"))?;
+        .map_err(|e| {
+            anyhow!("failed to bind named pipe {name}: {e} (another daemon already running?)")
+        })?;
     info!("daemon listening on {name}");
 
     let mut server = first;
@@ -117,8 +119,14 @@ async fn handle_client(state: Arc<DaemonState>, pipe: NamedPipeServer) -> Result
             let req_id = req.id;
             let kill_server = matches!(req.method, Method::KillServer);
             let response = match dispatch(state.clone(), attached.clone(), req).await {
-                Ok(value) => ServerMsg::Response { id: req_id, result: value },
-                Err(e) => ServerMsg::Error { id: req_id, message: e.to_string() },
+                Ok(value) => ServerMsg::Response {
+                    id: req_id,
+                    result: value,
+                },
+                Err(e) => ServerMsg::Error {
+                    id: req_id,
+                    message: e.to_string(),
+                },
             };
             let bytes = serde_json::to_vec(&response)?;
             {
@@ -146,10 +154,16 @@ async fn dispatch(
 ) -> Result<serde_json::Value> {
     match req.method {
         Method::Ping => Ok(json!("pong")),
-        Method::CreateSession { name, shell, cols, rows } => {
+        Method::CreateSession {
+            name,
+            shell,
+            cwd,
+            cols,
+            rows,
+        } => {
             let shell = shell.unwrap_or_else(|| DEFAULT_SHELL.to_string());
             let name = name.unwrap_or_else(|| state.manager.next_default_name());
-            let session = spawn_session(state.events.clone(), name, shell, cols, rows)?;
+            let session = spawn_session(state.events.clone(), name, shell, cwd, cols, rows)?;
             let info = session.info.clone();
             state.manager.sessions.lock().insert(info.id, session);
             let _ = state
@@ -209,10 +223,11 @@ async fn dispatch(
         Method::AttachSession { id } => {
             let (info, scrollback) = {
                 let map = state.manager.sessions.lock();
-                let session = map
-                    .get(&id)
-                    .ok_or_else(|| anyhow!("session not found"))?;
-                (session.info.clone(), scrollback_snapshot(&session.scrollback))
+                let session = map.get(&id).ok_or_else(|| anyhow!("session not found"))?;
+                (
+                    session.info.clone(),
+                    scrollback_snapshot(&session.scrollback),
+                )
             };
             attached.lock().await.insert(id);
             Ok(serde_json::to_value(AttachResult { info, scrollback })?)

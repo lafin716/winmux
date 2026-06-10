@@ -1,7 +1,7 @@
 import { reactive, computed } from "vue";
 import { api, type SessionInfo } from "../lib/tauri";
 import type { Workspace } from "../lib/layout-types";
-import { useWorkspaces } from "./useWorkspaces";
+import { useWorkspaces, workspaceDefaultCwd } from "./useWorkspaces";
 import { useFocus } from "./useFocus";
 import {
   addTabToLeaf,
@@ -78,10 +78,11 @@ export function useSessions() {
     state.sessions = await api.listSessions();
   }
 
-  async function create(opts: { name?: string; shell?: string } = {}) {
+  async function create(opts: { name?: string; shell?: string; cwd?: string } = {}) {
     const ws = activeWorkspace.value;
     const name = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
-    const info = await api.createSession({ ...opts, name });
+    const cwd = opts.cwd ?? workspaceDefaultCwd(ws);
+    const info = await api.createSession({ ...opts, name, cwd });
     state.sessions.push(info);
     if (ws) {
       const targetLeafId =

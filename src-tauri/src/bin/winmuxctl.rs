@@ -23,6 +23,9 @@ enum Cmd {
         /// Shell to launch (default: powershell.exe)
         #[arg(long)]
         shell: Option<String>,
+        /// Working directory for the new session
+        #[arg(long)]
+        cwd: Option<String>,
         #[arg(long, default_value_t = 120)]
         cols: u16,
         #[arg(long, default_value_t = 30)]
@@ -71,9 +74,21 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::New { name, shell, cols, rows } => {
+        Cmd::New {
+            name,
+            shell,
+            cwd,
+            cols,
+            rows,
+        } => {
             let info: SessionInfo = client
-                .request(Method::CreateSession { name, shell, cols, rows })
+                .request(Method::CreateSession {
+                    name,
+                    shell,
+                    cwd,
+                    cols,
+                    rows,
+                })
                 .await?;
             println!("created {} ({})", info.name, info.id);
         }
@@ -85,7 +100,10 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Rename { target, name } => {
             let id = resolve_target(&client, &target).await?;
             client
-                .request_raw(Method::RenameSession { id, name: name.clone() })
+                .request_raw(Method::RenameSession {
+                    id,
+                    name: name.clone(),
+                })
                 .await?;
             println!("renamed {id} -> {name}");
         }

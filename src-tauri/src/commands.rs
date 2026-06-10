@@ -13,13 +13,20 @@ pub async fn create_session(
     client: ClientState<'_>,
     name: Option<String>,
     shell: Option<String>,
+    cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<SessionInfo, String> {
     let cols = cols.unwrap_or(120);
     let rows = rows.unwrap_or(30);
     client
-        .request(Method::CreateSession { name, shell, cols, rows })
+        .request(Method::CreateSession {
+            name,
+            shell,
+            cwd,
+            cols,
+            rows,
+        })
         .await
         .map_err(|e| e.to_string())
 }
@@ -42,11 +49,7 @@ pub async fn kill_session(client: ClientState<'_>, id: Uuid) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn write_session(
-    client: ClientState<'_>,
-    id: Uuid,
-    data: String,
-) -> Result<(), String> {
+pub async fn write_session(client: ClientState<'_>, id: Uuid, data: String) -> Result<(), String> {
     client
         .request_raw(Method::WriteSession { id, data })
         .await
@@ -78,11 +81,7 @@ pub async fn attach_session(client: ClientState<'_>, id: Uuid) -> Result<String,
 }
 
 #[tauri::command]
-pub async fn rename_session(
-    client: ClientState<'_>,
-    id: Uuid,
-    name: String,
-) -> Result<(), String> {
+pub async fn rename_session(client: ClientState<'_>, id: Uuid, name: String) -> Result<(), String> {
     client
         .request_raw(Method::RenameSession { id, name })
         .await
