@@ -38,6 +38,7 @@ pub fn spawn_session(
     events: broadcast::Sender<Event>,
     name: String,
     shell: String,
+    shell_args: Vec<String>,
     cwd: Option<String>,
     cols: u16,
     rows: u16,
@@ -53,6 +54,7 @@ pub fn spawn_session(
         .map_err(|e| anyhow!("openpty failed: {e}"))?;
 
     let mut cmd = CommandBuilder::new(&shell);
+    cmd.args(shell_args);
     if let Some(cwd) = cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         if !Path::new(cwd).is_dir() {
             return Err(anyhow!("working directory does not exist: {cwd}"));

@@ -110,8 +110,7 @@ impl DaemonClient {
             let mut w = self.writer.lock().await;
             write_frame(&mut *w, &bytes).await?;
         }
-        rx.await
-            .map_err(|_| anyhow!("response channel closed"))?
+        rx.await.map_err(|_| anyhow!("response channel closed"))?
     }
 
     pub async fn request<T: DeserializeOwned>(&self, method: Method) -> Result<T> {
@@ -125,10 +124,7 @@ impl DaemonClient {
 }
 
 fn spawn_daemon_detached() -> Result<()> {
-    let exe = daemon_exe_path()?;
-    if !exe.exists() {
-        bail!("winmuxd executable not found at {}", exe.display());
-    }
+    let (exe, arg) = daemon_command()?;
 
     #[cfg(windows)]
     {
@@ -136,25 +132,54 @@ fn spawn_daemon_detached() -> Result<()> {
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        std::process::Command::new(&exe)
+        let mut command = std::process::Command::new(&exe);
+        if let Some(arg) = arg {
+            command.arg(arg);
+        }
+        command
             .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| anyhow!("failed to spawn daemon: {e}"))?;
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new(&exe)
+        let mut command = std::process::Command::new(&exe);
+        if let Some(arg) = arg {
+            command.arg(arg);
+        }
+        command
             .spawn()
             .map_err(|e| anyhow!("failed to spawn daemon: {e}"))?;
     }
     Ok(())
 }
 
-fn daemon_exe_path() -> Result<PathBuf> {
+fn daemon_command() -> Result<(PathBuf, Option<&'static str>)> {
     let current = std::env::current_exe()?;
     let dir = current
         .parent()
         .ok_or_else(|| anyhow!("current exe has no parent dir"))?;
-    let name = if cfg!(windows) { "winmuxd.exe" } else { "winmuxd" };
-    Ok(dir.join(name))
+    let name = if cfg!(windows) {
+        "winmuxd.exe"
+    } else {
+        "winmuxd"
+    };
+    let standalone_daemon = dir.join(name);
+
+    if standalone_daemon.exists() {
+        return Ok((standalone_daemon, None));
+    }
+
+    let current_name = current
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if current_name.eq_ignore_ascii_case("winmux") {
+        return Ok((current, Some(crate::DAEMON_ARG)));
+    }
+
+    bail!(
+        "winmuxd executable not found at {}",
+        standalone_daemon.display()
+    )
 }

@@ -157,13 +157,22 @@ async fn dispatch(
         Method::CreateSession {
             name,
             shell,
+            shell_args,
             cwd,
             cols,
             rows,
         } => {
             let shell = shell.unwrap_or_else(|| DEFAULT_SHELL.to_string());
             let name = name.unwrap_or_else(|| state.manager.next_default_name());
-            let session = spawn_session(state.events.clone(), name, shell, cwd, cols, rows)?;
+            let session = spawn_session(
+                state.events.clone(),
+                name,
+                shell,
+                shell_args,
+                cwd,
+                cols,
+                rows,
+            )?;
             let info = session.info.clone();
             state.manager.sessions.lock().insert(info.id, session);
             let _ = state

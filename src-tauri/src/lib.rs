@@ -10,6 +10,8 @@ use tauri::{Emitter, WindowEvent};
 use crate::ipc::client::DaemonClient;
 use crate::ipc::protocol::Event;
 
+pub const DAEMON_ARG: &str = "--winmux-daemon";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -38,10 +40,8 @@ pub fn run() {
                 while let Ok(ev) = rx.recv().await {
                     match ev {
                         Event::PtyOutput { id, data } => {
-                            let _ = app_handle.emit(
-                                "pty-output",
-                                serde_json::json!({ "id": id, "data": data }),
-                            );
+                            let _ = app_handle
+                                .emit("pty-output", serde_json::json!({ "id": id, "data": data }));
                         }
                         Event::PtyExit { id, status } => {
                             let _ = app_handle.emit(
@@ -53,10 +53,8 @@ pub fn run() {
                             let _ = app_handle.emit("session-added", info);
                         }
                         Event::SessionRemoved { id } => {
-                            let _ = app_handle.emit(
-                                "session-removed",
-                                serde_json::json!({ "id": id }),
-                            );
+                            let _ =
+                                app_handle.emit("session-removed", serde_json::json!({ "id": id }));
                         }
                         Event::SessionRenamed { id, name } => {
                             let _ = app_handle.emit(

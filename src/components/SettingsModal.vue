@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useSettings } from "../composables/useSettings";
 import { useKeybindings } from "../composables/useKeybindings";
 import { useWorkspaces } from "../composables/useWorkspaces";
+import { usePrefs } from "../composables/usePrefs";
 import {
   captureKeybinding,
   formatKeybinding,
@@ -17,15 +18,112 @@ import {
   updatePaletteItem,
   removePaletteItem,
 } from "../composables/usePalette";
+import {
+  TERMINAL_PRESETS,
+  cloneTerminalConfig,
+  configForPreset,
+  type TerminalConfig,
+  type TerminalPreset,
+} from "../lib/terminal-config";
 
 const { closeSettings } = useSettings();
 const { actions, bindingFor, prefixFor, setBinding, resetBinding, resetAll, isOverridden } =
   useKeybindings();
 const { items: paletteItems } = usePalette();
 const { state: workspaceState, activeWorkspace, updateWorkspaceSettings } = useWorkspaces();
+const { prefs, setPref } = usePrefs();
 
-type Category = "workspaces" | "keybindings" | "palette";
-const activeCategory = ref<Category>("workspaces");
+type Category = "terminal" | "workspaces" | "keybindings" | "palette";
+const activeCategory = ref<Category>("terminal");
+
+function setGlobalTerminal(config: TerminalConfig) {
+  setPref("defaultTerminal", cloneTerminalConfig(config));
+}
+
+function updateGlobalTerminal(patch: Partial<TerminalConfig>) {
+  setGlobalTerminal({ ...cloneTerminalConfig(prefs.defaultTerminal), ...patch });
+}
+
+function applyGlobalPreset(value: string) {
+  setGlobalTerminal(configForPreset(value as TerminalPreset));
+}
+
+function setWorkspaceTerminalEnabled(id: string, enabled: boolean) {
+  updateWorkspaceSettings(id, {
+    terminal: enabled ? cloneTerminalConfig(prefs.defaultTerminal) : null,
+  });
+}
+
+function workspaceTerminal(id: string): TerminalConfig | null {
+  return workspaceState.workspaces.find((ws) => ws.id === id)?.settings?.terminal ?? null;
+}
+
+function updateWorkspaceTerminal(id: string, patch: Partial<TerminalConfig>) {
+  const current = workspaceTerminal(id);
+  if (!current) return;
+  updateWorkspaceSettings(id, {
+    terminal: { ...cloneTerminalConfig(current), ...patch },
+  });
+}
+
+function applyWorkspacePreset(id: string, value: string) {
+  updateWorkspaceSettings(id, {
+    terminal: configForPreset(value as TerminalPreset),
+  });
+}
+
+async function chooseTerminalProgram(workspaceId?: string) {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "Select terminal program",
+    filters: [{ name: "Programs", extensions: ["exe", "cmd", "bat", "com"] }],
+  });
+  if (typeof selected !== "string") return;
+  if (workspaceId) {
+    updateWorkspaceTerminal(workspaceId, { preset: "custom", program: selected });
+  } else {
+    updateGlobalTerminal({ preset: "custom", program: selected });
+  }
+}
+
+function updateGlobalArg(index: number, value: string) {
+  const args = [...prefs.defaultTerminal.args];
+  args[index] = value;
+  updateGlobalTerminal({ args });
+}
+
+function addGlobalArg() {
+  updateGlobalTerminal({ args: [...prefs.defaultTerminal.args, ""] });
+}
+
+function removeGlobalArg(index: number) {
+  updateGlobalTerminal({
+    args: prefs.defaultTerminal.args.filter((_, argIndex) => argIndex !== index),
+  });
+}
+
+function updateWorkspaceArg(id: string, index: number, value: string) {
+  const terminal = workspaceTerminal(id);
+  if (!terminal) return;
+  const args = [...terminal.args];
+  args[index] = value;
+  updateWorkspaceTerminal(id, { args });
+}
+
+function addWorkspaceArg(id: string) {
+  const terminal = workspaceTerminal(id);
+  if (!terminal) return;
+  updateWorkspaceTerminal(id, { args: [...terminal.args, ""] });
+}
+
+function removeWorkspaceArg(id: string, index: number) {
+  const terminal = workspaceTerminal(id);
+  if (!terminal) return;
+  updateWorkspaceTerminal(id, {
+    args: terminal.args.filter((_, argIndex) => argIndex !== index),
+  });
+}
 
 function addPaletteRow() {
   addPaletteItem({ label: "New item", command: "", autoRun: false });
@@ -144,6 +242,12 @@ void sameBinding;
       <div class="body">
         <aside class="cats">
           <div
+            :class="['cat', { active: activeCategory === 'terminal' }]"
+            @click="activeCategory = 'terminal'"
+          >
+            Terminal
+          </div>
+          <div
             :class="['cat', { active: activeCategory === 'workspaces' }]"
             @click="activeCategory = 'workspaces'"
           >
@@ -163,7 +267,150 @@ void sameBinding;
           </div>
         </aside>
         <section class="panel">
-          <div v-if="activeCategory === 'workspaces'" class="workspaces">
+          <div v-if="activeCategory === 'terminal'" class="terminal-settings">
+            <div class="kb-header">
+              <div class="hint">
+                Choose the program used by new terminals. Existing sessions are not restarted.
+              </div>
+            </div>
+
+            <div class="terminal-card">
+              <div class="terminal-card-title">Global default</div>
+              <label class="field">
+                <span>Preset</span>
+                <select
+                  class="setting-input"
+                  :value="prefs.defaultTerminal.preset"
+                  @change="applyGlobalPreset(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="preset in TERMINAL_PRESETS" :key="preset.id" :value="preset.id">
+                    {{ preset.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Program</span>
+                <div class="program-row">
+                  <input
+                    class="setting-input mono"
+                    :value="prefs.defaultTerminal.program"
+                    placeholder="powershell.exe or C:\path\shell.exe"
+                    @input="updateGlobalTerminal({
+                      preset: 'custom',
+                      program: ($event.target as HTMLInputElement).value,
+                    })"
+                  />
+                  <button class="btn" @click="chooseTerminalProgram()">Browse</button>
+                </div>
+              </label>
+              <div class="field">
+                <span>Arguments</span>
+                <div class="args">
+                  <div
+                    v-for="(_, index) in prefs.defaultTerminal.args"
+                    :key="index"
+                    class="arg-row"
+                  >
+                    <input
+                      class="setting-input mono"
+                      :value="prefs.defaultTerminal.args[index]"
+                      placeholder="One argument per row"
+                      @input="updateGlobalArg(index, ($event.target as HTMLInputElement).value)"
+                    />
+                    <button class="btn" @click="removeGlobalArg(index)">Remove</button>
+                  </div>
+                  <button class="btn add-arg" @click="addGlobalArg">+ Add argument</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="terminal-section-title">Workspace overrides</div>
+            <div
+              v-for="ws in workspaceState.workspaces"
+              :key="ws.id"
+              class="terminal-card workspace-terminal"
+            >
+              <label class="override-title">
+                <input
+                  type="checkbox"
+                  :checked="ws.settings?.terminal !== null"
+                  @change="setWorkspaceTerminalEnabled(
+                    ws.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )"
+                />
+                <span>{{ ws.name }}</span>
+                <span v-if="ws.id === activeWorkspace?.id" class="active-tag">Active</span>
+                <span v-if="ws.settings?.terminal === null" class="inherit-tag">
+                  Uses global default
+                </span>
+              </label>
+              <template v-if="ws.settings?.terminal">
+                <label class="field">
+                  <span>Preset</span>
+                  <select
+                    class="setting-input"
+                    :value="ws.settings.terminal.preset"
+                    @change="applyWorkspacePreset(
+                      ws.id,
+                      ($event.target as HTMLSelectElement).value,
+                    )"
+                  >
+                    <option
+                      v-for="preset in TERMINAL_PRESETS"
+                      :key="preset.id"
+                      :value="preset.id"
+                    >
+                      {{ preset.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Program</span>
+                  <div class="program-row">
+                    <input
+                      class="setting-input mono"
+                      :value="ws.settings.terminal.program"
+                      @input="updateWorkspaceTerminal(ws.id, {
+                        preset: 'custom',
+                        program: ($event.target as HTMLInputElement).value,
+                      })"
+                    />
+                    <button class="btn" @click="chooseTerminalProgram(ws.id)">Browse</button>
+                  </div>
+                </label>
+                <div class="field">
+                  <span>Arguments</span>
+                  <div class="args">
+                    <div
+                      v-for="(_, index) in ws.settings.terminal.args"
+                      :key="index"
+                      class="arg-row"
+                    >
+                      <input
+                        class="setting-input mono"
+                        :value="ws.settings.terminal.args[index]"
+                        placeholder="One argument per row"
+                        @input="updateWorkspaceArg(
+                          ws.id,
+                          index,
+                          ($event.target as HTMLInputElement).value,
+                        )"
+                      />
+                      <button class="btn" @click="removeWorkspaceArg(ws.id, index)">
+                        Remove
+                      </button>
+                    </div>
+                    <button class="btn add-arg" @click="addWorkspaceArg(ws.id)">
+                      + Add argument
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'workspaces'" class="workspaces">
             <div class="kb-header">
               <div class="hint">
                 Set a default folder per workspace. New terminals and splits start in that folder.
@@ -497,6 +744,81 @@ void sameBinding;
   margin-top: 10px;
   color: #888;
   font-size: 12px;
+}
+.terminal-card {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #2b2b2b;
+  border-radius: 5px;
+  background: #202020;
+}
+.terminal-card-title,
+.terminal-section-title {
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+.terminal-section-title {
+  margin-top: 16px;
+}
+.workspace-terminal {
+  padding-top: 10px;
+}
+.override-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.inherit-tag {
+  margin-left: auto;
+  color: #777;
+  font-size: 11px;
+  font-weight: 400;
+}
+.field {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin-top: 9px;
+  color: #aaa;
+  font-size: 12px;
+}
+.field > span {
+  padding-top: 5px;
+}
+.setting-input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  color: #e6e6e6;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 3px;
+  font: inherit;
+}
+.setting-input:focus {
+  outline: none;
+  border-color: #4ec9b0;
+}
+.mono {
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+.program-row,
+.arg-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.args {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.add-arg {
+  align-self: flex-start;
 }
 .pal-input {
   background: #252525;

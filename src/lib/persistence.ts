@@ -1,5 +1,6 @@
 import type { WorkspaceStore } from "./layout-types";
 import type { Keybinding } from "./keybindings";
+import type { TerminalConfig } from "./terminal-config";
 
 const STORAGE_KEY = "winmux:workspaces:v1";
 const KEYBINDINGS_KEY = "winmux:keybindings:v1";
@@ -21,6 +22,7 @@ export type SidebarMode = "compact" | "expanded" | "minimal";
 export interface Prefs {
   skipKillSessionConfirm: boolean;
   sidebarMode: SidebarMode;
+  defaultTerminal: TerminalConfig;
 }
 
 interface PersistedPrefs {

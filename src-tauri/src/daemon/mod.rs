@@ -23,8 +23,7 @@ fn init_logging() {
     let dir = log_dir();
     let _ = std::fs::create_dir_all(&dir);
     let file_appender = tracing_appender::rolling::daily(&dir, "winmuxd.log");
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(file_appender)

@@ -1,3 +1,5 @@
+import type { TerminalConfig } from "./terminal-config";
+
 export type Direction = "horizontal" | "vertical";
 
 export interface LeafNode {
@@ -20,6 +22,8 @@ export type LayoutNode = LeafNode | SplitNode;
 export interface WorkspaceSettings {
   // Optional default working directory for new sessions in this workspace.
   defaultCwd: string;
+  // Null inherits the global terminal preference.
+  terminal: TerminalConfig | null;
 }
 
 export interface Workspace {

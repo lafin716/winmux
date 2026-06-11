@@ -8,7 +8,6 @@ import MenuBar from "./components/MenuBar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import ConfirmModal from "./components/ConfirmModal.vue";
 import PalettePopover from "./components/PalettePopover.vue";
-import { api } from "./lib/tauri";
 import { useSessions, nextDaemonName, displayName } from "./composables/useSessions";
 import { useWorkspaces, loadFromStorage, workspaceDefaultCwd } from "./composables/useWorkspaces";
 import { useFocus } from "./composables/useFocus";
@@ -36,7 +35,16 @@ import {
   splitLeaf,
 } from "./composables/useLayout";
 
-const { state: sessState, refresh, create, kill, focusedSession, workspaceSessions, rename } = useSessions();
+const {
+  state: sessState,
+  refresh,
+  create,
+  createForWorkspace,
+  kill,
+  focusedSession,
+  workspaceSessions,
+  rename,
+} = useSessions();
 const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const { settingsOpen, openSettings } = useSettings();
@@ -146,11 +154,11 @@ async function splitAndCreate(direction: "horizontal" | "vertical") {
     alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
     return;
   }
-  const info = await api.createSession({
+  const info = await createForWorkspace(ws, {
     name: nextDaemonName(ws, sessState.sessions),
     cwd: workspaceDefaultCwd(ws),
   });
-  sessState.sessions.push(info);
+  if (!info) return;
   const newRoot = splitLeaf(ws.layout, focusedLeafId.value, info.id, direction, "after");
   if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
 }
@@ -187,11 +195,11 @@ async function splitOrMove(dir: "left" | "right" | "up" | "down") {
     }
     const direction = (dir === "left" || dir === "right") ? "horizontal" : "vertical";
     const position = (dir === "left" || dir === "up") ? "before" : "after";
-    const info = await api.createSession({
+    const info = await createForWorkspace(ws, {
       name: nextDaemonName(ws, sessState.sessions),
       cwd: workspaceDefaultCwd(ws),
     });
-    sessState.sessions.push(info);
+    if (!info) return;
     const newRoot = splitLeaf(ws.layout, cur.id, info.id, direction, position);
     if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
     const newLeaf = findLeafBySession(newRoot, info.id);
@@ -206,16 +214,19 @@ async function quadrantSplit(corner: "tl" | "tr" | "bl" | "br") {
     alert(`최대 ${MAX_PANES}개 pane까지 분할할 수 있습니다.`);
     return;
   }
-  const a = await api.createSession({
+  const a = await createForWorkspace(ws, {
     name: nextDaemonName(ws, sessState.sessions),
     cwd: workspaceDefaultCwd(ws),
   });
-  sessState.sessions.push(a);
-  const b = await api.createSession({
+  if (!a) return;
+  const b = await createForWorkspace(ws, {
     name: nextDaemonName(ws, sessState.sessions),
     cwd: workspaceDefaultCwd(ws),
   });
-  sessState.sessions.push(b);
+  if (!b) {
+    await kill(a.id);
+    return;
+  }
   const newRoot = quadrantSplitLeaf(ws.layout, focusedLeafId.value, a.id, b.id, corner);
   if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
   const focusLeaf = findLeafBySession(newRoot, a.id);

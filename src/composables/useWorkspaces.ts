@@ -2,10 +2,12 @@ import { reactive, computed, watch } from "vue";
 import type { Workspace, WorkspaceStore, LayoutNode, WorkspaceSettings } from "../lib/layout-types";
 import { makeLeaf, nodeId } from "../lib/layout-types";
 import { loadWorkspaces, saveWorkspaces } from "../lib/persistence";
+import { normalizeTerminalConfig } from "../lib/terminal-config";
 
 function defaultWorkspaceSettings(): WorkspaceSettings {
   return {
     defaultCwd: "",
+    terminal: null,
   };
 }
 
@@ -28,6 +30,9 @@ function backfillWorkspace(ws: Workspace) {
     ...defaultWorkspaceSettings(),
     ...(ws.settings ?? {}),
   };
+  if (ws.settings.terminal) {
+    ws.settings.terminal = normalizeTerminalConfig(ws.settings.terminal);
+  }
 }
 
 function defaultStore(): WorkspaceStore {

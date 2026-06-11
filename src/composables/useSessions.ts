@@ -3,6 +3,8 @@ import { api, type SessionInfo } from "../lib/tauri";
 import type { Workspace } from "../lib/layout-types";
 import { useWorkspaces, workspaceDefaultCwd } from "./useWorkspaces";
 import { useFocus } from "./useFocus";
+import { usePrefs } from "./usePrefs";
+import { cloneTerminalConfig } from "../lib/terminal-config";
 import {
   addTabToLeaf,
   collectAllSessionIds,
@@ -49,6 +51,7 @@ export function nextDaemonName(ws: Workspace, sessions: SessionInfo[]): string {
 export function useSessions() {
   const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
   const { focusedLeafId, setFocusedLeaf } = useFocus();
+  const { prefs } = usePrefs();
 
   function getById(id: string): SessionInfo | undefined {
     return state.sessions.find((s) => s.id === id);
@@ -78,12 +81,52 @@ export function useSessions() {
     state.sessions = await api.listSessions();
   }
 
-  async function create(opts: { name?: string; shell?: string; cwd?: string } = {}) {
-    const ws = activeWorkspace.value;
+  async function createForWorkspace(
+    ws: Workspace | null | undefined,
+    opts: {
+      name?: string;
+      shell?: string;
+      shellArgs?: string[];
+      cwd?: string;
+    } = {},
+  ): Promise<SessionInfo | null> {
     const name = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
     const cwd = opts.cwd ?? workspaceDefaultCwd(ws);
-    const info = await api.createSession({ ...opts, name, cwd });
-    state.sessions.push(info);
+    const terminal = cloneTerminalConfig(ws?.settings?.terminal ?? prefs.defaultTerminal);
+    const shell = opts.shell ?? terminal.program.trim();
+    const shellArgs = opts.shell
+      ? (opts.shellArgs ?? [])
+      : (opts.shellArgs ?? terminal.args);
+    if (!shell) {
+      alert("Select a terminal program in Settings before creating a session.");
+      return null;
+    }
+    try {
+      const info = await api.createSession({
+        ...opts,
+        name,
+        shell,
+        shellArgs: [...shellArgs],
+        cwd,
+      });
+      state.sessions.push(info);
+      return info;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      alert(`Failed to create terminal:\n${message}`);
+      return null;
+    }
+  }
+
+  async function create(opts: {
+    name?: string;
+    shell?: string;
+    shellArgs?: string[];
+    cwd?: string;
+  } = {}) {
+    const ws = activeWorkspace.value;
+    const info = await createForWorkspace(ws, opts);
+    if (!info) return null;
     if (ws) {
       const targetLeafId =
         focusedLeafId.value && findLeafById(ws.layout, focusedLeafId.value)
@@ -122,6 +165,7 @@ export function useSessions() {
     workspaceSessions,
     refresh,
     create,
+    createForWorkspace,
     kill,
     rename,
     getById,

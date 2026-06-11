@@ -1,15 +1,23 @@
 import { reactive } from "vue";
 import { loadPrefs, savePrefs, type Prefs, type SidebarMode } from "../lib/persistence";
+import {
+  defaultTerminalConfig,
+  normalizeTerminalConfig,
+} from "../lib/terminal-config";
 
 const prefs = reactive<Prefs>({
   skipKillSessionConfirm: false,
   sidebarMode: "compact",
+  defaultTerminal: defaultTerminalConfig(),
 });
 
 export function loadPrefsFromStorage(): void {
   const stored = loadPrefs();
   if (!stored) return;
-  Object.assign(prefs, stored);
+  Object.assign(prefs, {
+    ...stored,
+    defaultTerminal: normalizeTerminalConfig(stored.defaultTerminal),
+  });
 }
 
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {

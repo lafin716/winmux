@@ -13,6 +13,7 @@ pub async fn create_session(
     client: ClientState<'_>,
     name: Option<String>,
     shell: Option<String>,
+    shell_args: Option<Vec<String>>,
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
@@ -23,6 +24,7 @@ pub async fn create_session(
         .request(Method::CreateSession {
             name,
             shell,
+            shell_args: shell_args.unwrap_or_default(),
             cwd,
             cols,
             rows,

@@ -23,6 +23,9 @@ enum Cmd {
         /// Shell to launch (default: powershell.exe)
         #[arg(long)]
         shell: Option<String>,
+        /// Argument passed to the shell (repeatable)
+        #[arg(long = "shell-arg")]
+        shell_args: Vec<String>,
         /// Working directory for the new session
         #[arg(long)]
         cwd: Option<String>,
@@ -77,6 +80,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::New {
             name,
             shell,
+            shell_args,
             cwd,
             cols,
             rows,
@@ -85,6 +89,7 @@ async fn run(cli: Cli) -> Result<()> {
                 .request(Method::CreateSession {
                     name,
                     shell,
+                    shell_args,
                     cwd,
                     cols,
                     rows,

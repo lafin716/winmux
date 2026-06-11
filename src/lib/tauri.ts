@@ -22,6 +22,7 @@ export const api = {
   createSession(opts: {
     name?: string;
     shell?: string;
+    shellArgs?: string[];
     cwd?: string;
     cols?: number;
     rows?: number;
