@@ -1,5 +1,9 @@
+use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::State;
+
+use base64::Engine;
+use serde::Serialize;
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 use crate::ipc::client::DaemonClient;
@@ -89,4 +93,252 @@ pub async fn rename_session(client: ClientState<'_>, id: Uuid, name: String) -> 
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+const MAX_PREVIEW_BYTES: u64 = 5 * 1024 * 1024;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    canonical_path: String,
+    name: String,
+    kind: &'static str,
+    language: String,
+    mime: String,
+    text: Option<String>,
+    data: Option<String>,
+    size: u64,
+    line: Option<u32>,
+    column: Option<u32>,
+}
+
+#[tauri::command]
+pub async fn read_file_preview(target: String, cwd: Option<String>) -> Result<FilePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || read_file_preview_sync(&target, cwd.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_file_preview_sync(target: &str, cwd: Option<&str>) -> Result<FilePreview, String> {
+    let (raw_path, line, column) = split_file_location(target);
+    let candidate = PathBuf::from(&raw_path);
+    let joined = if candidate.is_absolute() {
+        candidate
+    } else {
+        let base = cwd
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .ok_or_else(|| "Unable to determine the working directory.".to_string())?;
+        base.join(candidate)
+    };
+    let canonical = joined
+        .canonicalize()
+        .map_err(|e| format!("File not found: {} ({e})", joined.display()))?;
+    if !canonical.is_file() {
+        return Err(format!("Not a file: {}", canonical.display()));
+    }
+    let metadata = canonical.metadata().map_err(|e| e.to_string())?;
+    let size = metadata.len();
+    let extension = canonical
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let (language, mime) = file_type(&extension);
+    let name = canonical
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let canonical_path = canonical.to_string_lossy().into_owned();
+
+    if size > MAX_PREVIEW_BYTES {
+        return Ok(FilePreview {
+            canonical_path,
+            name,
+            kind: "too_large",
+            language: language.to_string(),
+            mime: mime.to_string(),
+            text: None,
+            data: None,
+            size,
+            line,
+            column,
+        });
+    }
+
+    let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+    if mime.starts_with("image/") {
+        return Ok(FilePreview {
+            canonical_path,
+            name,
+            kind: "image",
+            language: language.to_string(),
+            mime: mime.to_string(),
+            text: None,
+            data: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+            size,
+            line,
+            column,
+        });
+    }
+
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(FilePreview {
+            canonical_path,
+            name,
+            kind: "text",
+            language: language.to_string(),
+            mime: mime.to_string(),
+            text: Some(text),
+            data: None,
+            size,
+            line,
+            column,
+        }),
+        Err(_) => Ok(FilePreview {
+            canonical_path,
+            name,
+            kind: "binary",
+            language: language.to_string(),
+            mime: "application/octet-stream".to_string(),
+            text: None,
+            data: None,
+            size,
+            line,
+            column,
+        }),
+    }
+}
+
+fn split_file_location(target: &str) -> (String, Option<u32>, Option<u32>) {
+    let mut value = target
+        .trim()
+        .trim_matches(|c| {
+            matches!(
+                c,
+                '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
+        })
+        .to_string();
+    let mut numbers = Vec::new();
+    for _ in 0..2 {
+        let Some((prefix, suffix)) = value.rsplit_once(':') else {
+            break;
+        };
+        let Ok(number) = suffix.parse::<u32>() else {
+            break;
+        };
+        numbers.push(number);
+        value = prefix.to_string();
+    }
+    value = value
+        .trim()
+        .trim_matches(|c| {
+            matches!(
+                c,
+                '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
+        })
+        .to_string();
+    match numbers.as_slice() {
+        [line] => (value, Some(*line), None),
+        [column, line] => (value, Some(*line), Some(*column)),
+        _ => (value, None, None),
+    }
+}
+
+fn file_type(extension: &str) -> (&'static str, &'static str) {
+    match extension {
+        "rs" => ("rust", "text/plain"),
+        "ts" | "tsx" => ("typescript", "text/plain"),
+        "js" | "jsx" | "mjs" | "cjs" => ("javascript", "text/plain"),
+        "vue" => ("vue", "text/plain"),
+        "json" => ("json", "application/json"),
+        "toml" => ("toml", "text/plain"),
+        "yaml" | "yml" => ("yaml", "text/plain"),
+        "md" => ("markdown", "text/markdown"),
+        "html" | "htm" => ("html", "text/html"),
+        "css" | "scss" | "less" => ("css", "text/css"),
+        "py" => ("python", "text/plain"),
+        "sh" | "bash" => ("shell", "text/plain"),
+        "ps1" => ("powershell", "text/plain"),
+        "cmd" | "bat" => ("batch", "text/plain"),
+        "c" | "h" => ("c", "text/plain"),
+        "cpp" | "cc" | "cxx" | "hpp" => ("cpp", "text/plain"),
+        "png" => ("image", "image/png"),
+        "jpg" | "jpeg" => ("image", "image/jpeg"),
+        "gif" => ("image", "image/gif"),
+        "webp" => ("image", "image/webp"),
+        "bmp" => ("image", "image/bmp"),
+        "svg" => ("image", "image/svg+xml"),
+        _ => ("plaintext", "text/plain"),
+    }
+}
+
+fn browser_webview(app: &AppHandle, label: &str) -> Result<tauri::Webview, String> {
+    app.get_webview(label)
+        .ok_or_else(|| format!("Browser webview not found: {label}"))
+}
+
+#[tauri::command]
+pub fn browser_navigate(app: AppHandle, label: String, url: String) -> Result<(), String> {
+    let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Only HTTP and HTTPS URLs are allowed.".to_string());
+    }
+    browser_webview(&app, &label)?
+        .navigate(parsed)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn browser_back(app: AppHandle, label: String) -> Result<(), String> {
+    browser_webview(&app, &label)?
+        .eval("history.back()")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn browser_forward(app: AppHandle, label: String) -> Result<(), String> {
+    browser_webview(&app, &label)?
+        .eval("history.forward()")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn browser_reload(app: AppHandle, label: String) -> Result<(), String> {
+    browser_webview(&app, &label)?
+        .eval("location.reload()")
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::split_file_location;
+
+    #[test]
+    fn parses_windows_path_and_location() {
+        let (path, line, column) = split_file_location(r#"C:\work\main.rs:12:4"#);
+        assert_eq!(path, r#"C:\work\main.rs"#);
+        assert_eq!(line, Some(12));
+        assert_eq!(column, Some(4));
+    }
+
+    #[test]
+    fn preserves_drive_letter_without_location() {
+        let (path, line, column) = split_file_location(r#"C:\work\main.rs"#);
+        assert_eq!(path, r#"C:\work\main.rs"#);
+        assert_eq!(line, None);
+        assert_eq!(column, None);
+    }
+
+    #[test]
+    fn parses_quoted_path_with_location() {
+        let (path, line, column) = split_file_location(r#""C:\work dir\main.ts":8:2"#);
+        assert_eq!(path, r#"C:\work dir\main.ts"#);
+        assert_eq!(line, Some(8));
+        assert_eq!(column, Some(2));
+    }
 }

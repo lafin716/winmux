@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Icon } from "@iconify/vue";
+import { Icon, type IconifyIcon } from "@iconify/vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { usePalette, closePalette } from "../composables/usePalette";
+import { folderOpenIcon, terminalIcon } from "../lib/offline-icons";
 import { api, stringToBase64 } from "../lib/tauri";
 
 const { state, items } = usePalette();
@@ -13,16 +14,16 @@ const ITEM_SIZE = 56;
 interface RingItem {
   id: string;
   label: string;
-  icon: string;
+  icon: IconifyIcon;
   builtin: boolean;
 }
 
 const allItems = computed<RingItem[]>(() => [
-  { id: "__open_folder", label: "Open Folder", icon: "mdi:folder-open", builtin: true },
+  { id: "__open_folder", label: "Open Folder", icon: folderOpenIcon, builtin: true },
   ...items.map((it) => ({
     id: it.id,
     label: it.label || "(unnamed)",
-    icon: "mdi:console",
+    icon: terminalIcon,
     builtin: false,
   })),
 ]);

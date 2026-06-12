@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { Icon } from "@iconify/vue";
+import { Icon, type IconifyIcon } from "@iconify/vue";
 import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
+import { useResources } from "../composables/useResources";
 import { usePrefs, cycleSidebarMode } from "../composables/usePrefs";
 import { collectAllSessionIds, addTabToLeaf, findFirstLeaf } from "../composables/useLayout";
+import {
+  chevronLeftIcon,
+  chevronRightIcon,
+  plusIcon,
+} from "../lib/offline-icons";
 
 const {
   state,
@@ -15,6 +21,7 @@ const {
   setActiveWorkspace,
 } = useWorkspaces();
 const { kill } = useSessions();
+const resources = useResources();
 const { prefs } = usePrefs();
 
 const editingId = ref<string | null>(null);
@@ -71,7 +78,10 @@ async function removeWorkspace(id: string) {
         for (const sid of sessionIds) addTabToLeaf(target.layout, leaf.id, sid);
       }
     } else {
-      for (const sid of sessionIds) await kill(sid);
+      for (const sid of sessionIds) {
+        if (resources.getById(sid)) resources.forgetResource(sid);
+        else await kill(sid);
+      }
     }
   }
   deleteWorkspace(id);
@@ -89,14 +99,14 @@ function closeMenu() {
 
 const canDelete = computed(() => state.workspaces.length > 1);
 
-const toggleIcon = computed(() => {
+const toggleIcon = computed<IconifyIcon>(() => {
   switch (prefs.sidebarMode) {
     case "expanded":
-      return "mdi:chevron-left";
+      return chevronLeftIcon;
     case "compact":
     case "minimal":
     default:
-      return "mdi:chevron-right";
+      return chevronRightIcon;
   }
 });
 
@@ -139,7 +149,9 @@ function onRootClick() {
         <span v-if="prefs.sidebarMode === 'expanded'" class="ws-name">{{ ws.name }}</span>
       </template>
     </div>
-    <button class="add" title="New workspace" @click.stop="addWorkspace">+</button>
+    <button class="add" title="New workspace" @click.stop="addWorkspace">
+      <Icon class="ico" :icon="plusIcon" />
+    </button>
     <button
       class="mode-toggle"
       :class="'mt-' + prefs.sidebarMode"

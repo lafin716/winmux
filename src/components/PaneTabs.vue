@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, defineAsyncComponent } from "vue";
 import type { LeafNode } from "../lib/layout-types";
 import TerminalView from "./Terminal.vue";
+import BrowserView from "./BrowserView.vue";
 import { useSessions, displayName } from "../composables/useSessions";
+import {
+  useResources,
+  type BrowserTab,
+  type FileTab,
+} from "../composables/useResources";
 import { useWorkspaces } from "../composables/useWorkspaces";
 import { useFocus } from "../composables/useFocus";
 import { useDragState } from "../composables/useDragState";
@@ -18,8 +24,10 @@ import {
 } from "../composables/useLayout";
 
 const props = defineProps<{ leaf: LeafNode }>();
+const FileViewer = defineAsyncComponent(() => import("./FileViewer.vue"));
 
 const { state: sessState, kill, rename, create } = useSessions();
+const resources = useResources();
 const { activeWorkspace, replaceLayout } = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const drag = useDragState();
@@ -32,8 +40,40 @@ const catcherRef = ref<HTMLDivElement | null>(null);
 const isFocused = computed(() => focusedLeafId.value === props.leaf.id);
 
 function sessionName(id: string): string {
+  const resource = resources.getById(id);
+  if (resource?.kind === "file") return resource.preview.name;
+  if (resource?.kind === "browser") {
+    try {
+      return new URL(resource.url).hostname;
+    } catch {
+      return resource.url;
+    }
+  }
   const s = sessState.sessions.find((x) => x.id === id);
   return s ? displayName(s.name) : id.slice(0, 6);
+}
+
+function tabKind(id: string): "terminal" | "file" | "browser" {
+  return resources.getById(id)?.kind ?? "terminal";
+}
+
+function tabIcon(id: string): string {
+  switch (tabKind(id)) {
+    case "file": return "▤";
+    case "browser": return "◎";
+    default: return "›_";
+  }
+}
+
+function fileTab(id: string | null): FileTab | null {
+  if (!id) return null;
+  const tab = resources.getById(id);
+  return tab?.kind === "file" ? tab : null;
+}
+
+function browserTab(id: string): BrowserTab | null {
+  const tab = resources.getById(id);
+  return tab?.kind === "browser" ? tab : null;
 }
 
 function selectTab(id: string) {
@@ -42,6 +82,7 @@ function selectTab(id: string) {
 }
 
 function startRename(id: string) {
+  if (tabKind(id) !== "terminal") return;
   editingId.value = id;
   editValue.value = sessionName(id);
 }
@@ -55,6 +96,10 @@ async function commitRename() {
 
 async function closeTab(id: string, ev: MouseEvent) {
   ev.stopPropagation();
+  if (resources.getById(id)) {
+    resources.closeResource(id);
+    return;
+  }
   const ok = await confirm({
     message: `Kill session "${sessionName(id)}"?`,
     confirmLabel: "Kill",
@@ -216,6 +261,7 @@ async function onAddClick(ev: MouseEvent) {
             />
           </template>
           <template v-else>
+            <span class="kind-icon">{{ tabIcon(id) }}</span>
             <span class="name">{{ sessionName(id) }}</span>
           </template>
           <span class="close" @click="closeTab(id, $event)">×</span>
@@ -232,12 +278,24 @@ async function onAddClick(ev: MouseEvent) {
 
     <div class="body">
       <TerminalView
-        v-if="leaf.activeTabId"
+        v-if="leaf.activeTabId && tabKind(leaf.activeTabId) === 'terminal'"
         :key="leaf.activeTabId"
         :session-id="leaf.activeTabId"
         :active="isFocused"
       />
-      <div v-else class="empty">No session in this pane.</div>
+      <FileViewer
+        v-if="fileTab(leaf.activeTabId)"
+        :key="leaf.activeTabId ?? 'file'"
+        :preview="fileTab(leaf.activeTabId)!.preview"
+      />
+      <template v-for="id in leaf.tabs" :key="'browser-' + id">
+        <BrowserView
+          v-if="browserTab(id)"
+          :tab="browserTab(id)!"
+          :active="id === leaf.activeTabId"
+        />
+      </template>
+      <div v-if="!leaf.activeTabId" class="empty">No tab in this pane.</div>
 
       <div
         v-if="drag.state.active"
@@ -297,6 +355,11 @@ async function onAddClick(ev: MouseEvent) {
 .tab.active {
   background: #1e1e1e;
   color: #e6e6e6;
+}
+.kind-icon {
+  color: #4ec9b0;
+  font-family: Consolas, monospace;
+  font-size: 11px;
 }
 .close {
   opacity: 0.4;

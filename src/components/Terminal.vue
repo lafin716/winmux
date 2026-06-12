@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Terminal } from "@xterm/xterm";
+import {
+  Terminal,
+  type ILink,
+  type ILinkDecorations,
+  type ILinkProvider,
+} from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -17,6 +22,8 @@ import {
 } from "../lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { openPalette } from "../composables/usePalette";
+import { useResources } from "../composables/useResources";
+import { useSessions } from "../composables/useSessions";
 
 const props = defineProps<{
   sessionId: string;
@@ -32,6 +39,11 @@ let resizeObserver: ResizeObserver | null = null;
 let isComposing = false;
 let suppressUntil = 0;
 let disposed = false;
+let hoveredFileLink: { decorations: ILinkDecorations; ctrlKey: boolean } | null = null;
+const resources = useResources();
+const sessions = useSessions();
+
+const FILE_LINK_RE = /(?:"[^"\r\n]+"|'[^'\r\n]+'|(?:[a-zA-Z]:[\\/]|\.{1,2}[\\/]|[\\/])[^ \t<>|?"'\r\n]+|(?:[\w.@()-]+[\\/])+[\w.@()-]+|[\w.@()-]+\.[a-zA-Z0-9]{1,10})(?::\d+){0,2}/g;
 
 function detectWindowsBuild(): number {
   const uaData = (navigator as any).userAgentData;
@@ -65,6 +77,11 @@ async function init() {
     macOptionIsMeta: false,
     rightClickSelectsWord: false,
     windowsPty: { backend: "conpty", buildNumber: detectWindowsBuild() },
+    linkHandler: {
+      activate: (event, text) => {
+        if (event.ctrlKey) openResource(text);
+      },
+    },
     theme: {
       background: "#1e1e1e",
       foreground: "#d4d4d4",
@@ -72,7 +89,21 @@ async function init() {
   });
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
-  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(new WebLinksAddon((event, uri) => {
+    if (!event.ctrlKey) return;
+    resources.openBrowser(uri).catch(showOpenError);
+  }));
+  term.registerLinkProvider(createFileLinkProvider(term));
+  term.parser.registerOscHandler(7, (data) => {
+    const cwd = cwdFromOsc7(data);
+    if (cwd) sessions.setCurrentCwd(props.sessionId, cwd);
+    return true;
+  });
+  term.parser.registerOscHandler(9, (data) => {
+    const cwd = data.startsWith("9;") ? data.slice(2) : "";
+    if (cwd) sessions.setCurrentCwd(props.sessionId, cwd);
+    return true;
+  });
   const unicode11 = new Unicode11Addon();
   term.loadAddon(unicode11);
   term.unicode.activeVersion = "11";
@@ -169,8 +200,105 @@ async function init() {
   host.value.addEventListener("mousedown", onHostMouseDown, { capture: true });
   host.value.addEventListener("auxclick", onHostAuxClick, { capture: true });
   host.value.addEventListener("contextmenu", onContextMenu);
+  window.addEventListener("keydown", onModifierChange, true);
+  window.addEventListener("keyup", onModifierChange, true);
+  window.addEventListener("blur", clearHoveredFileLink);
 
   if (props.active) term.focus();
+}
+
+function createFileLinkProvider(terminal: Terminal): ILinkProvider {
+  return {
+    provideLinks(bufferLineNumber, callback) {
+      const line = terminal.buffer.active.getLine(bufferLineNumber - 1);
+      if (!line) {
+        callback(undefined);
+        return;
+      }
+      const text = line.translateToString(true);
+      const links: ILink[] = [];
+      FILE_LINK_RE.lastIndex = 0;
+      for (const match of text.matchAll(FILE_LINK_RE)) {
+        if (match.index === undefined) continue;
+        const raw = match[0].trim();
+        if (!raw || /^https?:\/\//i.test(raw)) continue;
+        const decorations: ILinkDecorations = {
+          pointerCursor: false,
+          underline: false,
+        };
+        const link: ILink = {
+          text: raw,
+          range: {
+            start: { x: match.index + 1, y: bufferLineNumber },
+            end: { x: match.index + match[0].length, y: bufferLineNumber },
+          },
+          decorations,
+          activate(event, target) {
+            if (event.ctrlKey) openResource(target);
+          },
+          hover(event) {
+            hoveredFileLink = { decorations, ctrlKey: event.ctrlKey };
+            setFileLinkDecorations(decorations, event.ctrlKey);
+          },
+          leave() {
+            if (hoveredFileLink?.decorations === decorations) hoveredFileLink = null;
+            setFileLinkDecorations(decorations, false);
+          },
+          dispose() {
+            if (hoveredFileLink?.decorations === decorations) hoveredFileLink = null;
+          },
+        };
+        links.push(link);
+      }
+      callback(links.length ? links : undefined);
+    },
+  };
+}
+
+function setFileLinkDecorations(decorations: ILinkDecorations, active: boolean) {
+  decorations.pointerCursor = active;
+  decorations.underline = active;
+}
+
+function onModifierChange(event: KeyboardEvent) {
+  if (!hoveredFileLink) return;
+  hoveredFileLink.ctrlKey = event.ctrlKey;
+  setFileLinkDecorations(hoveredFileLink.decorations, event.ctrlKey);
+}
+
+function clearHoveredFileLink() {
+  if (!hoveredFileLink) return;
+  setFileLinkDecorations(hoveredFileLink.decorations, false);
+  hoveredFileLink = null;
+}
+
+function cwdFromOsc7(data: string): string | null {
+  try {
+    const url = new URL(data);
+    if (url.protocol !== "file:") return null;
+    let path = decodeURIComponent(url.pathname);
+    if (url.hostname && url.hostname !== "localhost") {
+      return `\\\\${url.hostname}${path.replace(/\//g, "\\")}`;
+    }
+    if (/^\/[a-zA-Z]:\//.test(path)) path = path.slice(1);
+    return path.replace(/\//g, "\\");
+  } catch {
+    return null;
+  }
+}
+
+function openResource(raw: string) {
+  const text = raw.trim();
+  if (/^https?:\/\//i.test(text)) {
+    resources.openBrowser(text).catch(showOpenError);
+    return;
+  }
+  resources.openFile(text, sessions.currentCwd(props.sessionId)).catch(showOpenError);
+}
+
+function showOpenError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  alert(`Unable to open resource:\n${message}`);
 }
 
 function handleKeyEvent(ev: KeyboardEvent): boolean {
@@ -285,6 +413,10 @@ onBeforeUnmount(() => {
     host.value.removeEventListener("auxclick", onHostAuxClick, { capture: true });
     host.value.removeEventListener("contextmenu", onContextMenu);
   }
+  window.removeEventListener("keydown", onModifierChange, true);
+  window.removeEventListener("keyup", onModifierChange, true);
+  window.removeEventListener("blur", clearHoveredFileLink);
+  clearHoveredFileLink();
   // WebglAddon's internal cleanup can throw if the terminal core's _store is
   // already torn down; swallow so Vue's unmount cycle completes cleanly.
   try { webglAddon?.dispose(); } catch { /* ignore */ }

@@ -5,8 +5,22 @@ export interface SessionInfo {
   id: string;
   name: string;
   shell: string;
+  cwd?: string | null;
   cols: number;
   rows: number;
+}
+
+export interface FilePreview {
+  canonicalPath: string;
+  name: string;
+  kind: "text" | "image" | "binary" | "too_large";
+  language: string;
+  mime: string;
+  text?: string | null;
+  data?: string | null;
+  size: number;
+  line?: number | null;
+  column?: number | null;
 }
 
 export interface PtyOutputPayload {
@@ -47,6 +61,21 @@ export const api = {
   },
   renameSession(id: string, name: string): Promise<void> {
     return invoke("rename_session", { id, name });
+  },
+  readFilePreview(target: string, cwd?: string): Promise<FilePreview> {
+    return invoke("read_file_preview", { target, cwd });
+  },
+  browserNavigate(label: string, url: string): Promise<void> {
+    return invoke("browser_navigate", { label, url });
+  },
+  browserBack(label: string): Promise<void> {
+    return invoke("browser_back", { label });
+  },
+  browserForward(label: string): Promise<void> {
+    return invoke("browser_forward", { label });
+  },
+  browserReload(label: string): Promise<void> {
+    return invoke("browser_reload", { label });
   },
 };
 

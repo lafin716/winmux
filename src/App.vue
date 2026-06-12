@@ -18,6 +18,7 @@ import { useSettings } from "./composables/useSettings";
 import { useConfirm } from "./composables/useConfirm";
 import { loadPrefsFromStorage, cycleSidebarMode } from "./composables/usePrefs";
 import { loadPaletteFromStorage } from "./composables/usePalette";
+import { useResources } from "./composables/useResources";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
   addTabToLeaf,
@@ -50,6 +51,7 @@ const { focusedLeafId, setFocusedLeaf } = useFocus();
 const { settingsOpen, openSettings } = useSettings();
 const { prefixFor } = useKeybindings();
 const { confirm } = useConfirm();
+const resources = useResources();
 useGlobalShortcuts();
 
 async function bootstrap() {
@@ -103,6 +105,12 @@ async function promptRename() {
 }
 
 async function killFocused() {
+  const ws = activeWorkspace.value;
+  const leaf = ws && focusedLeafId.value ? findLeafById(ws.layout, focusedLeafId.value) : null;
+  if (leaf?.activeTabId && resources.getById(leaf.activeTabId)) {
+    resources.closeResource(leaf.activeTabId);
+    return;
+  }
   const s = focusedSession.value;
   if (!s) return;
   const ok = await confirm({
@@ -117,6 +125,12 @@ async function killFocused() {
 }
 
 async function killFocusedNow() {
+  const ws = activeWorkspace.value;
+  const leaf = ws && focusedLeafId.value ? findLeafById(ws.layout, focusedLeafId.value) : null;
+  if (leaf?.activeTabId && resources.getById(leaf.activeTabId)) {
+    resources.closeResource(leaf.activeTabId);
+    return;
+  }
   const s = focusedSession.value;
   if (!s) return;
   await kill(s.id);

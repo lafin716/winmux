@@ -34,8 +34,7 @@ pub fn run() {
         .setup(move |app| {
             // Set the window icon explicitly as well as embedding it through the
             // bundle configuration. This keeps dev builds and the tray in sync.
-            let icon =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(icon)?;
             }
@@ -91,6 +90,11 @@ pub fn run() {
             commands::resize_session,
             commands::attach_session,
             commands::rename_session,
+            commands::read_file_preview,
+            commands::browser_navigate,
+            commands::browser_back,
+            commands::browser_forward,
+            commands::browser_reload,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,6 +5,7 @@ import { useWorkspaces, workspaceDefaultCwd } from "./useWorkspaces";
 import { useFocus } from "./useFocus";
 import { usePrefs } from "./usePrefs";
 import { cloneTerminalConfig } from "../lib/terminal-config";
+import type { TerminalConfig } from "../lib/terminal-config";
 import {
   addTabToLeaf,
   collectAllSessionIds,
@@ -21,9 +22,48 @@ interface Store {
 const state = reactive<Store>({
   sessions: [],
 });
+const currentCwds = reactive<Record<string, string>>({});
 
 const DAEMON_PREFIX_RE = /^w\d+\./;
 const SESSION_NUM_RE = /^session-(\d+)$/;
+
+function withCwdIntegration(terminal: TerminalConfig, args: string[]): string[] {
+  const lowerArgs = args.map((arg) => arg.toLowerCase());
+  switch (terminal.preset) {
+    case "windows-powershell":
+    case "powershell":
+      if (lowerArgs.some((arg) => arg === "-command" || arg === "-file")) return args;
+      return [
+        ...args,
+        "-NoExit",
+        "-Command",
+        "$global:__winmuxPrompt=(Get-Command prompt).ScriptBlock; "
+          + "function global:prompt { $p=(Get-Location).Path; "
+          + "[Console]::Write(([char]27 + ']9;9;' + $p + [char]7)); "
+          + "& $global:__winmuxPrompt }",
+      ];
+    case "cmd":
+      if (lowerArgs.some((arg) => arg === "/c" || arg === "/k")) return args;
+      return [...args, "/K", "prompt $E]9;9;$P$E\\$P$G"];
+    case "git-bash":
+      if (args.length > 0 && args.join("\0") !== "--login\0-i") return args;
+      return [
+        "-c",
+        "export PROMPT_COMMAND='printf \"\\033]7;file:///%s\\033\\\\\" \"$(pwd -W)\"'; exec bash --login -i",
+      ];
+    case "wsl":
+      if (lowerArgs.some((arg) => arg === "-e" || arg === "--exec")) return args;
+      return [
+        ...args,
+        "sh",
+        "-lc",
+        "export PROMPT_COMMAND='printf \"\\033]7;file://wsl.localhost/%s%s\\033\\\\\" \"$WSL_DISTRO_NAME\" \"$PWD\"'; exec \"${SHELL:-bash}\" -l",
+      ];
+    case "custom":
+    default:
+      return args;
+  }
+}
 
 export function displayName(name: string): string {
   let out = name;
@@ -79,6 +119,9 @@ export function useSessions() {
 
   async function refresh() {
     state.sessions = await api.listSessions();
+    for (const session of state.sessions) {
+      if (session.cwd && !currentCwds[session.id]) currentCwds[session.id] = session.cwd;
+    }
   }
 
   async function createForWorkspace(
@@ -94,9 +137,12 @@ export function useSessions() {
     const cwd = opts.cwd ?? workspaceDefaultCwd(ws);
     const terminal = cloneTerminalConfig(ws?.settings?.terminal ?? prefs.defaultTerminal);
     const shell = opts.shell ?? terminal.program.trim();
-    const shellArgs = opts.shell
+    const requestedArgs = opts.shell
       ? (opts.shellArgs ?? [])
       : (opts.shellArgs ?? terminal.args);
+    const shellArgs = opts.shell
+      ? [...requestedArgs]
+      : withCwdIntegration(terminal, [...requestedArgs]);
     if (!shell) {
       alert("Select a terminal program in Settings before creating a session.");
       return null;
@@ -110,6 +156,7 @@ export function useSessions() {
         cwd,
       });
       state.sessions.push(info);
+      if (info.cwd) currentCwds[info.id] = info.cwd;
       return info;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -142,6 +189,7 @@ export function useSessions() {
     await api.killSession(id);
     const idx = state.sessions.findIndex((s) => s.id === id);
     if (idx >= 0) state.sessions.splice(idx, 1);
+    delete currentCwds[id];
     for (const ws of wsState.workspaces) {
       if (findLeafBySession(ws.layout, id)) {
         const { root } = removeTab(ws.layout, id);
@@ -169,5 +217,11 @@ export function useSessions() {
     kill,
     rename,
     getById,
+    currentCwd(id: string): string | undefined {
+      return currentCwds[id] ?? getById(id)?.cwd ?? undefined;
+    },
+    setCurrentCwd(id: string, cwd: string) {
+      if (cwd.trim()) currentCwds[id] = cwd.trim();
+    },
   };
 }

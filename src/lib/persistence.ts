@@ -1,4 +1,4 @@
-import type { WorkspaceStore } from "./layout-types";
+import type { LayoutNode, WorkspaceStore } from "./layout-types";
 import type { Keybinding } from "./keybindings";
 import type { TerminalConfig } from "./terminal-config";
 
@@ -45,11 +45,45 @@ export function loadWorkspaces(): WorkspaceStore | null {
 
 export function saveWorkspaces(store: WorkspaceStore): void {
   try {
-    const payload: Persisted = { version: 1, store };
+    const cleanStore: WorkspaceStore = {
+      activeWorkspaceId: store.activeWorkspaceId,
+      workspaces: store.workspaces.map((workspace) => ({
+        ...workspace,
+        settings: {
+          ...workspace.settings,
+          terminal: workspace.settings.terminal
+            ? {
+                ...workspace.settings.terminal,
+                args: [...workspace.settings.terminal.args],
+              }
+            : null,
+        },
+        layout: withoutTransientTabs(workspace.layout),
+      })),
+    };
+    const payload: Persisted = { version: 1, store: cleanStore };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (e) {
     console.warn("saveWorkspaces failed", e);
   }
+}
+
+function withoutTransientTabs(node: LayoutNode): LayoutNode {
+  if (node.kind === "leaf") {
+    const tabs = node.tabs.filter((id) => !id.startsWith("resource-"));
+    return {
+      ...node,
+      tabs,
+      activeTabId: node.activeTabId && tabs.includes(node.activeTabId)
+        ? node.activeTabId
+        : (tabs[0] ?? null),
+    };
+  }
+  return {
+    ...node,
+    sizes: [...node.sizes],
+    children: node.children.map(withoutTransientTabs),
+  };
 }
 
 export function loadKeybindings(): Record<string, Keybinding> | null {
