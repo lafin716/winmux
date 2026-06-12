@@ -15,10 +15,11 @@ pub fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let quit_i = MenuItem::with_id(app, "quit", "Quit (keep daemon)", true, None::<&str>)?;
     let kill_server_i = MenuItem::with_id(app, "kill-server", "Kill server", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_i, &hide_i, &sep, &quit_i, &kill_server_i])?;
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
 
     let _tray = TrayIconBuilder::with_id("winmux-tray")
         .tooltip("winmux")
-        .icon(app.default_window_icon().cloned().unwrap())
+        .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

@@ -5,7 +5,7 @@ pub mod pty;
 pub mod tray;
 
 use std::sync::Arc;
-use tauri::{Emitter, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use crate::ipc::client::DaemonClient;
 use crate::ipc::protocol::Event;
@@ -32,6 +32,14 @@ pub fn run() {
         .manage(client.clone())
         .manage(rt.clone())
         .setup(move |app| {
+            // Set the window icon explicitly as well as embedding it through the
+            // bundle configuration. This keeps dev builds and the tray in sync.
+            let icon =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(icon)?;
+            }
+
             tray::build_tray(app.handle())?;
 
             let app_handle = app.handle().clone();
