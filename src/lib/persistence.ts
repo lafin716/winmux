@@ -18,11 +18,13 @@ interface PersistedKeybindings {
 }
 
 export type SidebarMode = "compact" | "expanded" | "minimal";
+export type PaletteUiMode = "context" | "radial";
 
 export interface Prefs {
   skipKillSessionConfirm: boolean;
   sidebarMode: SidebarMode;
   defaultTerminal: TerminalConfig;
+  paletteUiMode: PaletteUiMode;
 }
 
 interface PersistedPrefs {

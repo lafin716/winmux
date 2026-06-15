@@ -1,5 +1,11 @@
 import { reactive } from "vue";
-import { loadPrefs, savePrefs, type Prefs, type SidebarMode } from "../lib/persistence";
+import {
+  loadPrefs,
+  savePrefs,
+  type PaletteUiMode,
+  type Prefs,
+  type SidebarMode,
+} from "../lib/persistence";
 import {
   defaultTerminalConfig,
   normalizeTerminalConfig,
@@ -9,14 +15,19 @@ const prefs = reactive<Prefs>({
   skipKillSessionConfirm: false,
   sidebarMode: "compact",
   defaultTerminal: defaultTerminalConfig(),
+  paletteUiMode: "context",
 });
 
 export function loadPrefsFromStorage(): void {
   const stored = loadPrefs();
   if (!stored) return;
+  const paletteUiMode: PaletteUiMode = stored.paletteUiMode === "radial"
+    ? "radial"
+    : "context";
   Object.assign(prefs, {
     ...stored,
     defaultTerminal: normalizeTerminalConfig(stored.defaultTerminal),
+    paletteUiMode,
   });
 }
 

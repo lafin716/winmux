@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent } from "vue";
+import {
+  ref,
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+} from "vue";
 import type { LeafNode } from "../lib/layout-types";
 import TerminalView from "./Terminal.vue";
 import BrowserView from "./BrowserView.vue";
@@ -13,6 +20,12 @@ import { useWorkspaces } from "../composables/useWorkspaces";
 import { useFocus } from "../composables/useFocus";
 import { useDragState } from "../composables/useDragState";
 import { useConfirm } from "../composables/useConfirm";
+import { usePrefs } from "../composables/usePrefs";
+import {
+  TERMINAL_PRESETS,
+  cloneTerminalConfig,
+  type TerminalConfig,
+} from "../lib/terminal-config";
 import {
   computeDropZone,
   leafCount,
@@ -32,12 +45,54 @@ const { activeWorkspace, replaceLayout } = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const drag = useDragState();
 const { confirm } = useConfirm();
+const { prefs } = usePrefs();
 
 const editingId = ref<string | null>(null);
 const editValue = ref("");
 const catcherRef = ref<HTMLDivElement | null>(null);
+const terminalMenuOpen = ref(false);
+const terminalMenuButtonRef = ref<HTMLButtonElement | null>(null);
+const terminalMenuRef = ref<HTMLDivElement | null>(null);
+const terminalMenuPosition = ref({ left: 0, top: 0 });
 
 const isFocused = computed(() => focusedLeafId.value === props.leaf.id);
+const effectiveTerminal = computed<TerminalConfig>(() =>
+  cloneTerminalConfig(activeWorkspace.value?.settings?.terminal ?? prefs.defaultTerminal),
+);
+const selectableTerminals = computed(() => {
+  const defaultTerminal = effectiveTerminal.value;
+  return TERMINAL_PRESETS
+    .filter((preset) => preset.id !== "custom")
+    .map((preset) => ({
+      ...preset,
+      preset: preset.id,
+      args: [...preset.args],
+    }))
+    .filter((preset) => !sameTerminalConfig(defaultTerminal, preset));
+});
+
+function sameTerminalConfig(a: TerminalConfig, b: TerminalConfig): boolean {
+  return a.preset === b.preset
+    && a.program.trim().toLowerCase() === b.program.trim().toLowerCase()
+    && a.args.length === b.args.length
+    && a.args.every((arg, index) => arg === b.args[index]);
+}
+
+function terminalLabel(terminal: TerminalConfig): string {
+  return TERMINAL_PRESETS.find((preset) => preset.id === terminal.preset)?.label
+    ?? "Custom terminal";
+}
+
+function terminalGlyph(terminal: TerminalConfig): string {
+  switch (terminal.preset) {
+    case "windows-powershell": return "PS";
+    case "powershell": return "P7";
+    case "cmd": return "C:\\";
+    case "wsl": return "WSL";
+    case "git-bash": return "GB";
+    case "custom": return ">_";
+  }
+}
 
 function sessionName(id: string): string {
   const resource = resources.getById(id);
@@ -227,9 +282,78 @@ function onPaneClick() {
 
 async function onAddClick(ev: MouseEvent) {
   ev.stopPropagation();
+  closeTerminalMenu();
   setFocusedLeaf(props.leaf.id);
   await create();
 }
+
+async function toggleTerminalMenu(ev: MouseEvent) {
+  ev.stopPropagation();
+  setFocusedLeaf(props.leaf.id);
+  terminalMenuOpen.value = !terminalMenuOpen.value;
+  if (!terminalMenuOpen.value) return;
+  await nextTick();
+  positionTerminalMenu();
+}
+
+function positionTerminalMenu() {
+  const button = terminalMenuButtonRef.value;
+  const menu = terminalMenuRef.value;
+  if (!button || !menu) return;
+  const buttonRect = button.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(
+    Math.max(margin, buttonRect.right - menuRect.width),
+    window.innerWidth - menuRect.width - margin,
+  );
+  const below = buttonRect.bottom + 4;
+  const top = below + menuRect.height <= window.innerHeight - margin
+    ? below
+    : Math.max(margin, buttonRect.top - menuRect.height - 4);
+  terminalMenuPosition.value = { left, top };
+}
+
+function closeTerminalMenu() {
+  terminalMenuOpen.value = false;
+}
+
+async function createWithTerminal(terminal: TerminalConfig) {
+  closeTerminalMenu();
+  setFocusedLeaf(props.leaf.id);
+  await create({ terminal: cloneTerminalConfig(terminal) });
+}
+
+function onDocumentPointerDown(ev: PointerEvent) {
+  if (!terminalMenuOpen.value) return;
+  const target = ev.target as Node | null;
+  if (target && (
+    terminalMenuRef.value?.contains(target)
+    || terminalMenuButtonRef.value?.contains(target)
+  )) return;
+  closeTerminalMenu();
+}
+
+function onWindowKeyDown(ev: KeyboardEvent) {
+  if (ev.key === "Escape" && terminalMenuOpen.value) {
+    ev.stopPropagation();
+    closeTerminalMenu();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("pointerdown", onDocumentPointerDown, true);
+  window.addEventListener("keydown", onWindowKeyDown, true);
+  window.addEventListener("resize", closeTerminalMenu);
+  window.addEventListener("scroll", closeTerminalMenu, true);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("pointerdown", onDocumentPointerDown, true);
+  window.removeEventListener("keydown", onWindowKeyDown, true);
+  window.removeEventListener("resize", closeTerminalMenu);
+  window.removeEventListener("scroll", closeTerminalMenu, true);
+});
 </script>
 
 <template>
@@ -272,9 +396,66 @@ async function onAddClick(ev: MouseEvent) {
         @dragover.prevent
         @drop="onTabDropAtIndex($event, leaf.tabs.length)"
       />
-      <button class="add-tab" title="New terminal (Ctrl+N)" @click="onAddClick">+</button>
+      <div class="add-terminal">
+        <button class="add-tab" title="New terminal (Ctrl+N)" @click="onAddClick">+</button>
+        <button
+          ref="terminalMenuButtonRef"
+          class="terminal-menu-toggle"
+          :class="{ active: terminalMenuOpen }"
+          title="Select terminal"
+          aria-label="Select terminal"
+          :aria-expanded="terminalMenuOpen"
+          @click="toggleTerminalMenu"
+        >
+          ▾
+        </button>
+      </div>
       <div class="tab-bar-spacer" />
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="terminalMenuOpen"
+        ref="terminalMenuRef"
+        class="terminal-picker"
+        :style="{
+          left: `${terminalMenuPosition.left}px`,
+          top: `${terminalMenuPosition.top}px`,
+        }"
+        role="menu"
+        @mousedown.stop
+      >
+        <div class="terminal-picker-title">New terminal</div>
+        <button
+          class="terminal-option default-option"
+          role="menuitem"
+          @click="createWithTerminal(effectiveTerminal)"
+        >
+          <span class="terminal-option-icon">{{ terminalGlyph(effectiveTerminal) }}</span>
+          <span class="terminal-option-copy">
+            <span class="terminal-option-name">
+              {{ terminalLabel(effectiveTerminal) }}
+              <span class="default-badge">Default</span>
+            </span>
+            <span class="terminal-option-path">{{ effectiveTerminal.program }}</span>
+          </span>
+        </button>
+        <div v-if="selectableTerminals.length" class="terminal-option-separator" />
+        <button
+          v-for="terminal in selectableTerminals"
+          :key="terminal.preset"
+          class="terminal-option"
+          role="menuitem"
+          @click="createWithTerminal(terminal)"
+        >
+          <span class="terminal-option-icon">{{ terminalGlyph(terminal) }}</span>
+          <span class="terminal-option-copy">
+            <span class="terminal-option-name">{{ terminal.label }}</span>
+            <span class="terminal-option-path">{{ terminal.program }}</span>
+          </span>
+        </button>
+      </div>
+    </Teleport>
 
     <div class="body">
       <TerminalView
@@ -375,20 +556,42 @@ async function onAddClick(ev: MouseEvent) {
   width: 4px;
   flex-shrink: 0;
 }
-.add-tab {
+.add-terminal {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-right: 1px solid #111;
+}
+.add-tab,
+.terminal-menu-toggle {
   background: transparent;
   border: none;
   color: #888;
-  width: 28px;
   height: 28px;
-  font-size: 16px;
   line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
 }
-.add-tab:hover {
+.add-tab {
+  width: 26px;
+  padding: 0 0 1px;
+  font-size: 16px;
+}
+.terminal-menu-toggle {
+  width: 18px;
+  padding: 0 2px 1px 0;
+  font-size: 11px;
+}
+.add-tab:hover,
+.terminal-menu-toggle:hover,
+.terminal-menu-toggle.active {
   background: #2e2e2e;
   color: #e6e6e6;
+}
+.terminal-menu-toggle:focus-visible,
+.add-tab:focus-visible {
+  outline: 1px solid #4ec9b0;
+  outline-offset: -1px;
 }
 .tab-bar-spacer { flex: 1; }
 input {
@@ -435,4 +638,98 @@ input {
 .overlay.zone-right { top: 0; bottom: 0; right: 0; width: 50%; }
 .overlay.zone-top { left: 0; right: 0; top: 0; height: 50%; }
 .overlay.zone-bottom { left: 0; right: 0; bottom: 0; height: 50%; }
+
+.terminal-picker {
+  position: fixed;
+  z-index: 1000;
+  width: 292px;
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 5px;
+  background: #252525;
+  border: 1px solid #111;
+  border-radius: 5px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.58);
+  color: #d4d4d4;
+  font-size: 12px;
+}
+.terminal-picker-title {
+  padding: 5px 8px 7px;
+  color: #8f8f8f;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.terminal-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 8px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.terminal-option:hover,
+.terminal-option:focus-visible {
+  background: #094771;
+  color: #fff;
+  outline: none;
+}
+.terminal-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  flex: 0 0 30px;
+  color: #4ec9b0;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  font: 600 10px/1 Consolas, "Cascadia Mono", monospace;
+}
+.terminal-option-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+.terminal-option-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #e6e6e6;
+  font-weight: 500;
+}
+.terminal-option-path {
+  overflow: hidden;
+  color: #888;
+  font: 10px/1.2 Consolas, "Cascadia Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-option:hover .terminal-option-path,
+.terminal-option:focus-visible .terminal-option-path {
+  color: #c8dce9;
+}
+.default-badge {
+  padding: 1px 5px;
+  color: #9fe3d4;
+  background: rgba(78, 201, 176, 0.14);
+  border: 1px solid rgba(78, 201, 176, 0.32);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 600;
+}
+.terminal-option-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: #151515;
+}
 </style>

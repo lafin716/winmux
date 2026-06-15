@@ -131,11 +131,14 @@ export function useSessions() {
       shell?: string;
       shellArgs?: string[];
       cwd?: string;
+      terminal?: TerminalConfig;
     } = {},
   ): Promise<SessionInfo | null> {
     const name = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
     const cwd = opts.cwd ?? workspaceDefaultCwd(ws);
-    const terminal = cloneTerminalConfig(ws?.settings?.terminal ?? prefs.defaultTerminal);
+    const terminal = cloneTerminalConfig(
+      opts.terminal ?? ws?.settings?.terminal ?? prefs.defaultTerminal,
+    );
     const shell = opts.shell ?? terminal.program.trim();
     const requestedArgs = opts.shell
       ? (opts.shellArgs ?? [])
@@ -149,7 +152,6 @@ export function useSessions() {
     }
     try {
       const info = await api.createSession({
-        ...opts,
         name,
         shell,
         shellArgs: [...shellArgs],
@@ -170,6 +172,7 @@ export function useSessions() {
     shell?: string;
     shellArgs?: string[];
     cwd?: string;
+    terminal?: TerminalConfig;
   } = {}) {
     const ws = activeWorkspace.value;
     const info = await createForWorkspace(ws, opts);

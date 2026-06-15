@@ -25,6 +25,7 @@ import {
   type TerminalConfig,
   type TerminalPreset,
 } from "../lib/terminal-config";
+import type { PaletteUiMode } from "../lib/persistence";
 
 const { closeSettings } = useSettings();
 const { actions, bindingFor, prefixFor, setBinding, resetBinding, resetAll, isOverridden } =
@@ -499,9 +500,28 @@ void sameBinding;
           <div v-else-if="activeCategory === 'palette'" class="palette">
             <div class="kb-header">
               <div class="hint">
-                Items appear in the radial menu opened by middle-clicking inside a terminal. "Auto-run" appends Enter; otherwise the command is pasted at the prompt.
+                Middle-click inside a terminal to open the palette. "Auto-run" appends Enter; otherwise the command is pasted at the prompt.
               </div>
               <button class="reset-all" @click="addPaletteRow">+ Add item</button>
+            </div>
+            <div class="palette-display-card">
+              <label class="field">
+                <span>Display style</span>
+                <select
+                  class="setting-input"
+                  :value="prefs.paletteUiMode"
+                  @change="setPref(
+                    'paletteUiMode',
+                    ($event.target as HTMLSelectElement).value as PaletteUiMode,
+                  )"
+                >
+                  <option value="context">Context menu</option>
+                  <option value="radial">Radial menu</option>
+                </select>
+              </label>
+              <div class="note">
+                Context menu is the default compact list. Radial menu keeps the original circular layout.
+              </div>
             </div>
             <div class="table">
               <div class="row pal head">
@@ -744,6 +764,20 @@ void sameBinding;
   margin-top: 10px;
   color: #888;
   font-size: 12px;
+}
+.palette-display-card {
+  padding: 10px 12px 12px;
+  margin-bottom: 12px;
+  border: 1px solid #2b2b2b;
+  border-radius: 4px;
+  background: #202020;
+}
+.palette-display-card .field {
+  margin-top: 0;
+}
+.palette-display-card .note {
+  margin: 8px 0 0 90px;
+  line-height: 1.4;
 }
 .terminal-card {
   padding: 12px;
