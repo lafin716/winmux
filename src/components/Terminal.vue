@@ -39,7 +39,7 @@ let resizeObserver: ResizeObserver | null = null;
 let isComposing = false;
 let suppressUntil = 0;
 let disposed = false;
-let hoveredFileLink: { decorations: ILinkDecorations; ctrlKey: boolean } | null = null;
+let hoveredFileLink: ILinkDecorations | null = null;
 const resources = useResources();
 const sessions = useSessions();
 
@@ -200,8 +200,6 @@ async function init() {
   host.value.addEventListener("mousedown", onHostMouseDown, { capture: true });
   host.value.addEventListener("auxclick", onHostAuxClick, { capture: true });
   host.value.addEventListener("contextmenu", onContextMenu);
-  window.addEventListener("keydown", onModifierChange, true);
-  window.addEventListener("keyup", onModifierChange, true);
   window.addEventListener("blur", clearHoveredFileLink);
 
   if (props.active) term.focus();
@@ -236,16 +234,16 @@ function createFileLinkProvider(terminal: Terminal): ILinkProvider {
           activate(event, target) {
             if (event.ctrlKey) openResource(target);
           },
-          hover(event) {
-            hoveredFileLink = { decorations, ctrlKey: event.ctrlKey };
-            setFileLinkDecorations(decorations, event.ctrlKey);
+          hover() {
+            hoveredFileLink = decorations;
+            setFileLinkDecorations(decorations, true);
           },
           leave() {
-            if (hoveredFileLink?.decorations === decorations) hoveredFileLink = null;
+            if (hoveredFileLink === decorations) hoveredFileLink = null;
             setFileLinkDecorations(decorations, false);
           },
           dispose() {
-            if (hoveredFileLink?.decorations === decorations) hoveredFileLink = null;
+            if (hoveredFileLink === decorations) hoveredFileLink = null;
           },
         };
         links.push(link);
@@ -260,15 +258,9 @@ function setFileLinkDecorations(decorations: ILinkDecorations, active: boolean) 
   decorations.underline = active;
 }
 
-function onModifierChange(event: KeyboardEvent) {
-  if (!hoveredFileLink) return;
-  hoveredFileLink.ctrlKey = event.ctrlKey;
-  setFileLinkDecorations(hoveredFileLink.decorations, event.ctrlKey);
-}
-
 function clearHoveredFileLink() {
   if (!hoveredFileLink) return;
-  setFileLinkDecorations(hoveredFileLink.decorations, false);
+  setFileLinkDecorations(hoveredFileLink, false);
   hoveredFileLink = null;
 }
 
@@ -413,8 +405,6 @@ onBeforeUnmount(() => {
     host.value.removeEventListener("auxclick", onHostAuxClick, { capture: true });
     host.value.removeEventListener("contextmenu", onContextMenu);
   }
-  window.removeEventListener("keydown", onModifierChange, true);
-  window.removeEventListener("keyup", onModifierChange, true);
   window.removeEventListener("blur", clearHoveredFileLink);
   clearHoveredFileLink();
   // WebglAddon's internal cleanup can throw if the terminal core's _store is
