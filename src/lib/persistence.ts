@@ -1,4 +1,4 @@
-import type { LayoutNode, WorkspaceStore } from "./layout-types";
+import type { LayoutNode, TerminalTabSnapshot, WorkspaceStore } from "./layout-types";
 import type { Keybinding } from "./keybindings";
 import type { TerminalConfig } from "./terminal-config";
 
@@ -61,6 +61,10 @@ export function saveWorkspaces(store: WorkspaceStore): void {
             : null,
         },
         layout: withoutTransientTabs(workspace.layout),
+        terminalSnapshots: terminalSnapshotsForLayout(
+          workspace.terminalSnapshots ?? {},
+          workspace.layout,
+        ),
       })),
     };
     const payload: Persisted = { version: 1, store: cleanStore };
@@ -68,6 +72,33 @@ export function saveWorkspaces(store: WorkspaceStore): void {
   } catch (e) {
     console.warn("saveWorkspaces failed", e);
   }
+}
+
+function terminalSnapshotsForLayout(
+  snapshots: Record<string, TerminalTabSnapshot>,
+  layout: LayoutNode,
+): Record<string, TerminalTabSnapshot> {
+  const ids = new Set(collectPersistentTabIds(layout));
+  const out: Record<string, TerminalTabSnapshot> = {};
+  for (const [id, snapshot] of Object.entries(snapshots)) {
+    if (!ids.has(id)) continue;
+    out[id] = {
+      name: snapshot.name,
+      cwd: snapshot.cwd ?? null,
+      terminal: {
+        ...snapshot.terminal,
+        args: [...snapshot.terminal.args],
+      },
+    };
+  }
+  return out;
+}
+
+function collectPersistentTabIds(node: LayoutNode): string[] {
+  if (node.kind === "leaf") return node.tabs.filter((id) => !id.startsWith("resource-"));
+  const out: string[] = [];
+  for (const child of node.children) out.push(...collectPersistentTabIds(child));
+  return out;
 }
 
 function withoutTransientTabs(node: LayoutNode): LayoutNode {

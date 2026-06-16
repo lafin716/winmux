@@ -60,6 +60,27 @@ export function collectAllLeaves(root: LayoutNode): LeafNode[] {
   return out;
 }
 
+export function replaceTabId(root: LayoutNode, oldId: string, newId: string): boolean {
+  if (isLeaf(root)) {
+    let changed = false;
+    root.tabs = root.tabs.map((id) => {
+      if (id !== oldId) return id;
+      changed = true;
+      return newId;
+    });
+    if (root.activeTabId === oldId) {
+      root.activeTabId = newId;
+      changed = true;
+    }
+    return changed;
+  }
+  let changed = false;
+  for (const child of root.children) {
+    if (replaceTabId(child, oldId, newId)) changed = true;
+  }
+  return changed;
+}
+
 /** Find parent split + index of a child node in the tree. Returns null if node is root. */
 function findParent(
   root: LayoutNode,

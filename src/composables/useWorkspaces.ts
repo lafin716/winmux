@@ -1,8 +1,14 @@
 import { reactive, computed, watch } from "vue";
-import type { Workspace, WorkspaceStore, LayoutNode, WorkspaceSettings } from "../lib/layout-types";
+import type {
+  LayoutNode,
+  TerminalTabSnapshot,
+  Workspace,
+  WorkspaceSettings,
+  WorkspaceStore,
+} from "../lib/layout-types";
 import { makeLeaf, nodeId } from "../lib/layout-types";
 import { loadWorkspaces, saveWorkspaces } from "../lib/persistence";
-import { normalizeTerminalConfig } from "../lib/terminal-config";
+import { cloneTerminalConfig, normalizeTerminalConfig } from "../lib/terminal-config";
 
 function defaultWorkspaceSettings(): WorkspaceSettings {
   return {
@@ -20,6 +26,7 @@ function makeDefaultWorkspace(name = "Default", icon = "W", index = 1): Workspac
     nextSessionSeq: 1,
     settings: defaultWorkspaceSettings(),
     layout: makeLeaf(nodeId("leaf")),
+    terminalSnapshots: {},
   };
 }
 
@@ -33,6 +40,20 @@ function backfillWorkspace(ws: Workspace) {
   if (ws.settings.terminal) {
     ws.settings.terminal = normalizeTerminalConfig(ws.settings.terminal);
   }
+  const snapshots: Record<string, TerminalTabSnapshot> = {};
+  for (const [id, snapshot] of Object.entries(ws.terminalSnapshots ?? {})) {
+    if (!snapshot?.terminal) continue;
+    snapshots[id] = {
+      name: typeof snapshot.name === "string" && snapshot.name.trim()
+        ? snapshot.name.trim()
+        : "session",
+      cwd: typeof snapshot.cwd === "string" && snapshot.cwd.trim()
+        ? snapshot.cwd.trim()
+        : null,
+      terminal: normalizeTerminalConfig(snapshot.terminal),
+    };
+  }
+  ws.terminalSnapshots = snapshots;
 }
 
 function defaultStore(): WorkspaceStore {
@@ -142,6 +163,43 @@ export function useWorkspaces() {
     };
   }
 
+  function setTerminalSnapshot(
+    workspaceId: string,
+    sessionId: string,
+    snapshot: TerminalTabSnapshot,
+  ) {
+    const ws = state.workspaces.find((w) => w.id === workspaceId);
+    if (!ws) return;
+    ws.terminalSnapshots[sessionId] = {
+      name: snapshot.name.trim() || "session",
+      cwd: snapshot.cwd?.trim() || null,
+      terminal: cloneTerminalConfig(snapshot.terminal),
+    };
+  }
+
+  function updateTerminalSnapshot(
+    workspaceId: string,
+    sessionId: string,
+    patch: Partial<TerminalTabSnapshot>,
+  ) {
+    const ws = state.workspaces.find((w) => w.id === workspaceId);
+    const current = ws?.terminalSnapshots[sessionId];
+    if (!ws || !current) return;
+    ws.terminalSnapshots[sessionId] = {
+      ...current,
+      ...patch,
+      terminal: patch.terminal ? cloneTerminalConfig(patch.terminal) : current.terminal,
+      name: (patch.name ?? current.name).trim() || "session",
+      cwd: patch.cwd === undefined ? current.cwd : (patch.cwd?.trim() || null),
+    };
+  }
+
+  function removeTerminalSnapshot(workspaceId: string, sessionId: string) {
+    const ws = state.workspaces.find((w) => w.id === workspaceId);
+    if (!ws) return;
+    delete ws.terminalSnapshots[sessionId];
+  }
+
   return {
     state,
     activeWorkspace,
@@ -151,6 +209,9 @@ export function useWorkspaces() {
     setActiveWorkspace,
     replaceLayout,
     updateWorkspaceSettings,
+    setTerminalSnapshot,
+    updateTerminalSnapshot,
+    removeTerminalSnapshot,
   };
 }
 

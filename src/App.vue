@@ -33,6 +33,7 @@ import {
   moveTabToLeaf,
   pruneMissing,
   quadrantSplitLeaf,
+  replaceTabId,
   splitLeaf,
 } from "./composables/useLayout";
 
@@ -46,7 +47,12 @@ const {
   workspaceSessions,
   rename,
 } = useSessions();
-const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
+const {
+  activeWorkspace,
+  removeTerminalSnapshot,
+  replaceLayout,
+  state: wsState,
+} = useWorkspaces();
 const { focusedLeafId, setFocusedLeaf } = useFocus();
 const { settingsOpen, openSettings } = useSettings();
 const { prefixFor } = useKeybindings();
@@ -61,8 +67,10 @@ async function bootstrap() {
   loadFromStorage();
   await refresh();
 
-  // Prune missing sessions from every workspace layout.
   const validIds = new Set(sessState.sessions.map((s) => s.id));
+  await restorePersistedSessions(validIds);
+
+  // Prune missing sessions from every workspace layout.
   for (const ws of wsState.workspaces) {
     const newRoot = pruneMissing(ws.layout, validIds);
     if (newRoot !== ws.layout) replaceLayout(ws.id, newRoot);
@@ -94,6 +102,36 @@ async function bootstrap() {
   // Ensure at least one session exists.
   if (sessState.sessions.length === 0) {
     await create();
+  }
+}
+
+async function restorePersistedSessions(validIds: Set<string>) {
+  for (const ws of wsState.workspaces) {
+    const ids = [...new Set(collectAllSessionIds(ws.layout))];
+    for (const oldId of ids) {
+      if (validIds.has(oldId) || resources.getById(oldId)) continue;
+      const snapshot = ws.terminalSnapshots?.[oldId];
+      if (!snapshot) continue;
+
+      const restored = await createForWorkspace(ws, {
+        name: snapshot.name,
+        terminal: snapshot.terminal,
+        cwd: snapshot.cwd ?? undefined,
+        showError: false,
+      }) ?? await createForWorkspace(ws, {
+        name: snapshot.name,
+        showError: false,
+      });
+
+      if (!restored) {
+        console.warn(`Failed to restore terminal tab ${oldId}`);
+        continue;
+      }
+      if (replaceTabId(ws.layout, oldId, restored.id)) {
+        removeTerminalSnapshot(ws.id, oldId);
+        validIds.add(restored.id);
+      }
+    }
   }
 }
 

@@ -26,6 +26,12 @@ export interface WorkspaceSettings {
   terminal: TerminalConfig | null;
 }
 
+export interface TerminalTabSnapshot {
+  name: string;
+  terminal: TerminalConfig;
+  cwd?: string | null;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -38,6 +44,7 @@ export interface Workspace {
   nextSessionSeq: number;
   settings: WorkspaceSettings;
   layout: LayoutNode;
+  terminalSnapshots: Record<string, TerminalTabSnapshot>;
 }
 
 export interface WorkspaceStore {

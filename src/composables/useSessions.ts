@@ -89,7 +89,14 @@ export function nextDaemonName(ws: Workspace, sessions: SessionInfo[]): string {
 }
 
 export function useSessions() {
-  const { activeWorkspace, replaceLayout, state: wsState } = useWorkspaces();
+  const {
+    activeWorkspace,
+    replaceLayout,
+    removeTerminalSnapshot,
+    setTerminalSnapshot,
+    state: wsState,
+    updateTerminalSnapshot,
+  } = useWorkspaces();
   const { focusedLeafId, setFocusedLeaf } = useFocus();
   const { prefs } = usePrefs();
 
@@ -132,9 +139,13 @@ export function useSessions() {
       shellArgs?: string[];
       cwd?: string;
       terminal?: TerminalConfig;
+      showError?: boolean;
     } = {},
   ): Promise<SessionInfo | null> {
-    const name = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
+    const requestedName = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
+    const name = ws && requestedName
+      ? withWorkspacePrefix(requestedName, ws.index)
+      : requestedName;
     const cwd = opts.cwd ?? workspaceDefaultCwd(ws);
     const terminal = cloneTerminalConfig(
       opts.terminal ?? ws?.settings?.terminal ?? prefs.defaultTerminal,
@@ -159,10 +170,21 @@ export function useSessions() {
       });
       state.sessions.push(info);
       if (info.cwd) currentCwds[info.id] = info.cwd;
+      if (ws) {
+        setTerminalSnapshot(ws.id, info.id, {
+          name: displayName(info.name),
+          terminal,
+          cwd: info.cwd ?? cwd ?? null,
+        });
+      }
       return info;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      alert(`Failed to create terminal:\n${message}`);
+      if (opts.showError === false) {
+        console.warn("Failed to create terminal", message);
+      } else {
+        alert(`Failed to create terminal:\n${message}`);
+      }
       return null;
     }
   }
@@ -173,6 +195,7 @@ export function useSessions() {
     shellArgs?: string[];
     cwd?: string;
     terminal?: TerminalConfig;
+    showError?: boolean;
   } = {}) {
     const ws = activeWorkspace.value;
     const info = await createForWorkspace(ws, opts);
@@ -198,6 +221,7 @@ export function useSessions() {
         const { root } = removeTab(ws.layout, id);
         if (root !== ws.layout) replaceLayout(ws.id, root);
       }
+      removeTerminalSnapshot(ws.id, id);
     }
   }
 
@@ -208,6 +232,7 @@ export function useSessions() {
     const fullName = `${prefix}${displayName(name)}`;
     await api.renameSession(id, fullName);
     if (s) s.name = fullName;
+    if (ws) updateTerminalSnapshot(ws.id, id, { name: displayName(fullName) });
   }
 
   return {
@@ -224,7 +249,15 @@ export function useSessions() {
       return currentCwds[id] ?? getById(id)?.cwd ?? undefined;
     },
     setCurrentCwd(id: string, cwd: string) {
-      if (cwd.trim()) currentCwds[id] = cwd.trim();
+      const clean = cwd.trim();
+      if (!clean) return;
+      currentCwds[id] = clean;
+      for (const ws of wsState.workspaces) {
+        if (findLeafBySession(ws.layout, id)) {
+          updateTerminalSnapshot(ws.id, id, { cwd: clean });
+          break;
+        }
+      }
     },
   };
 }
