@@ -39,7 +39,6 @@ let resizeObserver: ResizeObserver | null = null;
 let isComposing = false;
 let suppressUntil = 0;
 let disposed = false;
-let hoveredFileLink: ILinkDecorations | null = null;
 const resources = useResources();
 const sessions = useSessions();
 
@@ -200,7 +199,6 @@ async function init() {
   host.value.addEventListener("mousedown", onHostMouseDown, { capture: true });
   host.value.addEventListener("auxclick", onHostAuxClick, { capture: true });
   host.value.addEventListener("contextmenu", onContextMenu);
-  window.addEventListener("blur", clearHoveredFileLink);
 
   if (props.active) term.focus();
 }
@@ -221,8 +219,8 @@ function createFileLinkProvider(terminal: Terminal): ILinkProvider {
         const raw = match[0].trim();
         if (!raw || /^https?:\/\//i.test(raw)) continue;
         const decorations: ILinkDecorations = {
-          pointerCursor: false,
-          underline: false,
+          pointerCursor: true,
+          underline: true,
         };
         const link: ILink = {
           text: raw,
@@ -234,34 +232,12 @@ function createFileLinkProvider(terminal: Terminal): ILinkProvider {
           activate(event, target) {
             if (event.ctrlKey) openResource(target);
           },
-          hover() {
-            hoveredFileLink = decorations;
-            setFileLinkDecorations(decorations, true);
-          },
-          leave() {
-            if (hoveredFileLink === decorations) hoveredFileLink = null;
-            setFileLinkDecorations(decorations, false);
-          },
-          dispose() {
-            if (hoveredFileLink === decorations) hoveredFileLink = null;
-          },
         };
         links.push(link);
       }
       callback(links.length ? links : undefined);
     },
   };
-}
-
-function setFileLinkDecorations(decorations: ILinkDecorations, active: boolean) {
-  decorations.pointerCursor = active;
-  decorations.underline = active;
-}
-
-function clearHoveredFileLink() {
-  if (!hoveredFileLink) return;
-  setFileLinkDecorations(hoveredFileLink, false);
-  hoveredFileLink = null;
 }
 
 function cwdFromOsc7(data: string): string | null {
@@ -405,8 +381,6 @@ onBeforeUnmount(() => {
     host.value.removeEventListener("auxclick", onHostAuxClick, { capture: true });
     host.value.removeEventListener("contextmenu", onContextMenu);
   }
-  window.removeEventListener("blur", clearHoveredFileLink);
-  clearHoveredFileLink();
   // WebglAddon's internal cleanup can throw if the terminal core's _store is
   // already torn down; swallow so Vue's unmount cycle completes cleanly.
   try { webglAddon?.dispose(); } catch { /* ignore */ }

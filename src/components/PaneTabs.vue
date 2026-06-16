@@ -54,6 +54,9 @@ const terminalMenuOpen = ref(false);
 const terminalMenuButtonRef = ref<HTMLButtonElement | null>(null);
 const terminalMenuRef = ref<HTMLDivElement | null>(null);
 const terminalMenuPosition = ref({ left: 0, top: 0 });
+const tabMenuFor = ref<string | null>(null);
+const tabMenuRef = ref<HTMLDivElement | null>(null);
+const tabMenuPosition = ref({ left: 0, top: 0 });
 
 const isFocused = computed(() => focusedLeafId.value === props.leaf.id);
 const effectiveTerminal = computed<TerminalConfig>(() =>
@@ -134,10 +137,12 @@ function browserTab(id: string): BrowserTab | null {
 function selectTab(id: string) {
   props.leaf.activeTabId = id;
   setFocusedLeaf(props.leaf.id);
+  closeTabContextMenu();
 }
 
 function startRename(id: string) {
   if (tabKind(id) !== "terminal") return;
+  closeTabContextMenu();
   editingId.value = id;
   editValue.value = sessionName(id);
 }
@@ -151,18 +156,99 @@ async function commitRename() {
 
 async function closeTab(id: string, ev: MouseEvent) {
   ev.stopPropagation();
+  await closeTabs([id]);
+}
+
+async function closeTabs(ids: string[]) {
+  closeTabContextMenu();
+  const uniqueIds = [...new Set(ids)].filter((id) => props.leaf.tabs.includes(id));
+  if (!uniqueIds.length) return;
+  const terminalIds = uniqueIds.filter((id) => !resources.getById(id));
+  if (terminalIds.length > 0) {
+    const ok = await confirm({
+      message: terminalIds.length === 1
+        ? `Kill session "${sessionName(terminalIds[0])}"?`
+        : `Kill ${terminalIds.length} terminal sessions?`,
+      confirmLabel: "Kill",
+      rememberKey: "skipKillSessionConfirm",
+    });
+    if (!ok) return;
+  }
+  for (const id of uniqueIds) {
+    await closeTabById(id);
+  }
+}
+
+async function closeTabById(id: string) {
   if (resources.getById(id)) {
     resources.closeResource(id);
     return;
   }
-  const ok = await confirm({
-    message: `Kill session "${sessionName(id)}"?`,
-    confirmLabel: "Kill",
-    rememberKey: "skipKillSessionConfirm",
-  });
-  if (ok) {
-    await kill(id);
-  }
+  await kill(id);
+}
+
+function onTabMouseDown(ev: MouseEvent) {
+  if (ev.button !== 1) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+}
+
+async function onTabAuxClick(ev: MouseEvent, id: string) {
+  if (ev.button !== 1) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  await closeTabs([id]);
+}
+
+async function openTabContextMenu(ev: MouseEvent, id: string) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  closeTerminalMenu();
+  setFocusedLeaf(props.leaf.id);
+  tabMenuFor.value = id;
+  tabMenuPosition.value = { left: ev.clientX, top: ev.clientY };
+  await nextTick();
+  positionTabContextMenu();
+}
+
+function positionTabContextMenu() {
+  const menu = tabMenuRef.value;
+  if (!menu) return;
+  const rect = menu.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(
+    Math.max(margin, tabMenuPosition.value.left),
+    window.innerWidth - rect.width - margin,
+  );
+  const top = Math.min(
+    Math.max(margin, tabMenuPosition.value.top),
+    window.innerHeight - rect.height - margin,
+  );
+  tabMenuPosition.value = { left, top };
+}
+
+function closeTabContextMenu() {
+  tabMenuFor.value = null;
+}
+
+function closeCurrentFromMenu() {
+  if (!tabMenuFor.value) return;
+  void closeTabs([tabMenuFor.value]);
+}
+
+function closeOtherTabsFromMenu() {
+  if (!tabMenuFor.value) return;
+  const targetId = tabMenuFor.value;
+  void closeTabs(props.leaf.tabs.filter((id) => id !== targetId));
+}
+
+function closeAllTabsFromMenu() {
+  void closeTabs([...props.leaf.tabs]);
+}
+
+function renameFromMenu() {
+  if (!tabMenuFor.value || tabKind(tabMenuFor.value) !== "terminal") return;
+  startRename(tabMenuFor.value);
 }
 
 // ---- Drag handlers ----
@@ -289,6 +375,7 @@ async function onAddClick(ev: MouseEvent) {
 
 async function toggleTerminalMenu(ev: MouseEvent) {
   ev.stopPropagation();
+  closeTabContextMenu();
   setFocusedLeaf(props.leaf.id);
   terminalMenuOpen.value = !terminalMenuOpen.value;
   if (!terminalMenuOpen.value) return;
@@ -325,8 +412,14 @@ async function createWithTerminal(terminal: TerminalConfig) {
 }
 
 function onDocumentPointerDown(ev: PointerEvent) {
-  if (!terminalMenuOpen.value) return;
   const target = ev.target as Node | null;
+  if (tabMenuFor.value) {
+    if (target && tabMenuRef.value?.contains(target)) {
+      return;
+    }
+    closeTabContextMenu();
+  }
+  if (!terminalMenuOpen.value) return;
   if (target && (
     terminalMenuRef.value?.contains(target)
     || terminalMenuButtonRef.value?.contains(target)
@@ -335,24 +428,30 @@ function onDocumentPointerDown(ev: PointerEvent) {
 }
 
 function onWindowKeyDown(ev: KeyboardEvent) {
-  if (ev.key === "Escape" && terminalMenuOpen.value) {
+  if (ev.key === "Escape" && (terminalMenuOpen.value || tabMenuFor.value)) {
     ev.stopPropagation();
     closeTerminalMenu();
+    closeTabContextMenu();
   }
+}
+
+function closeFloatingMenus() {
+  closeTerminalMenu();
+  closeTabContextMenu();
 }
 
 onMounted(() => {
   window.addEventListener("pointerdown", onDocumentPointerDown, true);
   window.addEventListener("keydown", onWindowKeyDown, true);
-  window.addEventListener("resize", closeTerminalMenu);
-  window.addEventListener("scroll", closeTerminalMenu, true);
+  window.addEventListener("resize", closeFloatingMenus);
+  window.addEventListener("scroll", closeFloatingMenus, true);
 });
 
 onUnmounted(() => {
   window.removeEventListener("pointerdown", onDocumentPointerDown, true);
   window.removeEventListener("keydown", onWindowKeyDown, true);
-  window.removeEventListener("resize", closeTerminalMenu);
-  window.removeEventListener("scroll", closeTerminalMenu, true);
+  window.removeEventListener("resize", closeFloatingMenus);
+  window.removeEventListener("scroll", closeFloatingMenus, true);
 });
 </script>
 
@@ -370,6 +469,9 @@ onUnmounted(() => {
           draggable="true"
           @click="selectTab(id)"
           @dblclick="startRename(id)"
+          @mousedown="onTabMouseDown"
+          @auxclick="onTabAuxClick($event, id)"
+          @contextmenu="openTabContextMenu($event, id)"
           @dragstart="onTabDragStart($event, id)"
           @dragend="onTabDragEnd"
         >
@@ -453,6 +555,47 @@ onUnmounted(() => {
             <span class="terminal-option-name">{{ terminal.label }}</span>
             <span class="terminal-option-path">{{ terminal.program }}</span>
           </span>
+        </button>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="tabMenuFor"
+        ref="tabMenuRef"
+        class="tab-context-menu"
+        :style="{
+          left: `${tabMenuPosition.left}px`,
+          top: `${tabMenuPosition.top}px`,
+        }"
+        role="menu"
+        @mousedown.stop
+        @contextmenu.prevent
+      >
+        <button
+          class="tab-menu-item"
+          :class="{ disabled: tabKind(tabMenuFor) !== 'terminal' }"
+          role="menuitem"
+          :disabled="tabKind(tabMenuFor) !== 'terminal'"
+          @click="renameFromMenu"
+        >
+          Rename
+        </button>
+        <div class="tab-menu-separator" />
+        <button class="tab-menu-item" role="menuitem" @click="closeAllTabsFromMenu">
+          Close All Tabs
+        </button>
+        <button class="tab-menu-item" role="menuitem" @click="closeCurrentFromMenu">
+          Close Current Tab
+        </button>
+        <button
+          class="tab-menu-item"
+          :class="{ disabled: leaf.tabs.length <= 1 }"
+          role="menuitem"
+          :disabled="leaf.tabs.length <= 1"
+          @click="closeOtherTabsFromMenu"
+        >
+          Close Other Tabs
         </button>
       </div>
     </Teleport>
@@ -728,6 +871,52 @@ input {
   font-weight: 600;
 }
 .terminal-option-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: #151515;
+}
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 172px;
+  padding: 5px;
+  background: #252525;
+  border: 1px solid #111;
+  border-radius: 5px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.58);
+  color: #d4d4d4;
+  font-size: 12px;
+}
+.tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+.tab-menu-item:hover,
+.tab-menu-item:focus-visible {
+  background: #094771;
+  color: #fff;
+  outline: none;
+}
+.tab-menu-item.disabled,
+.tab-menu-item:disabled {
+  color: #666;
+  cursor: not-allowed;
+}
+.tab-menu-item.disabled:hover,
+.tab-menu-item:disabled:hover {
+  background: transparent;
+  color: #666;
+}
+.tab-menu-separator {
   height: 1px;
   margin: 4px 6px;
   background: #151515;
