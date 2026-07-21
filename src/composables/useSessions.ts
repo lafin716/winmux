@@ -6,6 +6,7 @@ import { useFocus } from "./useFocus";
 import { usePrefs } from "./usePrefs";
 import { cloneTerminalConfig } from "../lib/terminal-config";
 import type { TerminalConfig } from "../lib/terminal-config";
+import { displayName, withWorkspacePrefix } from "../lib/session-names";
 import {
   addTabToLeaf,
   collectAllSessionIds,
@@ -14,6 +15,10 @@ import {
   findLeafBySession,
   removeTab,
 } from "./useLayout";
+
+// Re-exported so existing importers keep resolving the name helpers from here;
+// the scheme itself lives in the pure `../lib/session-names` module.
+export { displayName, withWorkspacePrefix };
 
 interface Store {
   sessions: SessionInfo[];
@@ -24,7 +29,6 @@ const state = reactive<Store>({
 });
 const currentCwds = reactive<Record<string, string>>({});
 
-const DAEMON_PREFIX_RE = /^w\d+\./;
 const SESSION_NUM_RE = /^session-(\d+)$/;
 
 function withCwdIntegration(terminal: TerminalConfig, args: string[]): string[] {
@@ -63,16 +67,6 @@ function withCwdIntegration(terminal: TerminalConfig, args: string[]): string[] 
     default:
       return args;
   }
-}
-
-export function displayName(name: string): string {
-  let out = name;
-  while (DAEMON_PREFIX_RE.test(out)) out = out.replace(DAEMON_PREFIX_RE, "");
-  return out;
-}
-
-export function withWorkspacePrefix(visible: string, wsIndex: number): string {
-  return `w${wsIndex}.${displayName(visible)}`;
 }
 
 export function nextDaemonName(ws: Workspace, sessions: SessionInfo[]): string {

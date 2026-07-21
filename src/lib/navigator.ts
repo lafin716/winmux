@@ -1,0 +1,68 @@
+// Pure derivation for the left Navigator: given the Workspaces store and the
+// daemon Session list, produce the grouped Workspace -> Session tree the panel
+// renders, with the active Workspace and focused Session flagged.
+//
+// This module has no Vue or DOM dependency so it can be unit-tested directly
+// (the pre-agreed test seam). Sessions map to their Workspace via the daemon
+// name prefix `w{index}.`, using the shared `session-names` scheme helpers so
+// Navigator labels match the Session tab labels exactly.
+
+import type { Workspace } from "./layout-types";
+import type { SessionInfo } from "./tauri";
+import { displayName, workspaceIndexOf } from "./session-names";
+
+export interface NavigatorSessionNode {
+  /** Daemon session id. */
+  id: string;
+  /** Full daemon name, including the Workspace prefix. */
+  name: string;
+  /** Un-prefixed label shown in the Navigator. */
+  displayName: string;
+  isFocusedSession: boolean;
+}
+
+export interface NavigatorWorkspaceNode {
+  id: string;
+  name: string;
+  icon?: string;
+  index: number;
+  isActiveWorkspace: boolean;
+  sessions: NavigatorSessionNode[];
+}
+
+export interface NavigatorInput {
+  workspaces: Pick<Workspace, "id" | "name" | "icon" | "index">[];
+  sessions: Pick<SessionInfo, "id" | "name">[];
+  activeWorkspaceId: string | null;
+  focusedSessionId: string | null;
+}
+
+export function buildNavigatorTree(input: NavigatorInput): NavigatorWorkspaceNode[] {
+  const { workspaces, sessions, activeWorkspaceId, focusedSessionId } = input;
+
+  // Bucket sessions by the Workspace index in their prefix. Sessions with no
+  // prefix, or a prefix matching no Workspace, stay orphaned and are dropped.
+  const byIndex = new Map<number, NavigatorSessionNode[]>();
+  for (const s of sessions) {
+    const index = workspaceIndexOf(s.name);
+    if (index === null) continue;
+    const node: NavigatorSessionNode = {
+      id: s.id,
+      name: s.name,
+      displayName: displayName(s.name),
+      isFocusedSession: s.id === focusedSessionId,
+    };
+    const bucket = byIndex.get(index);
+    if (bucket) bucket.push(node);
+    else byIndex.set(index, [node]);
+  }
+
+  return workspaces.map((ws) => ({
+    id: ws.id,
+    name: ws.name,
+    icon: ws.icon,
+    index: ws.index,
+    isActiveWorkspace: ws.id === activeWorkspaceId,
+    sessions: byIndex.get(ws.index) ?? [],
+  }));
+}

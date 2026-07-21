@@ -5,26 +5,46 @@ import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
 import { useResources } from "../composables/useResources";
 import { useShellPanels } from "../composables/useShellPanels";
-import { collectAllSessionIds, addTabToLeaf, findFirstLeaf } from "../composables/useLayout";
+import { useFocus } from "../composables/useFocus";
+import {
+  collectAllSessionIds,
+  addTabToLeaf,
+  findFirstLeaf,
+  activateSessionTab,
+} from "../composables/useLayout";
+import { buildNavigatorTree } from "../lib/navigator";
 import {
   chevronLeftIcon,
   chevronRightIcon,
   plusIcon,
+  terminalIcon,
 } from "../lib/offline-icons";
 
 const {
   state,
-  activeWorkspace,
   createWorkspace,
   deleteWorkspace,
   renameWorkspace,
   setActiveWorkspace,
 } = useWorkspaces();
-const { kill } = useSessions();
+const { state: sessState, focusedSession, kill } = useSessions();
+const { setFocusedLeaf } = useFocus();
 const resources = useResources();
 const { panels, toggleLeftCollapsed } = useShellPanels();
 
 const collapsed = computed(() => panels.left.collapsed);
+
+// Grouped Workspace -> Session tree the Navigator renders. Derivation and its
+// active/focused flags are unit-tested in `../lib/navigator`; this component
+// only renders the result and wires clicks back to focus/activation.
+const tree = computed(() =>
+  buildNavigatorTree({
+    workspaces: state.workspaces,
+    sessions: sessState.sessions,
+    activeWorkspaceId: state.activeWorkspaceId,
+    focusedSessionId: focusedSession.value?.id ?? null,
+  }),
+);
 
 const editingId = ref<string | null>(null);
 const editValue = ref("");
@@ -38,6 +58,19 @@ function initialOf(name: string, icon?: string): string {
 
 function activate(id: string) {
   setActiveWorkspace(id);
+  closeMenu();
+}
+
+// Click-to-focus a Session from the Navigator: switch to its Workspace if
+// needed, activate its tab within its leaf, and mark that leaf focused —
+// mirroring the focus path used elsewhere (e.g. App.vue's focusSessionByIndex).
+function focusSession(workspaceId: string, sessionId: string) {
+  const ws = state.workspaces.find((w) => w.id === workspaceId);
+  if (!ws) return;
+  if (state.activeWorkspaceId !== workspaceId) setActiveWorkspace(workspaceId);
+  const leafId = activateSessionTab(ws.layout, sessionId);
+  if (leafId === null) return;
+  setFocusedLeaf(leafId);
   closeMenu();
 }
 
@@ -108,33 +141,47 @@ const toggleIcon = computed<IconifyIcon>(() =>
 
 <template>
   <aside :class="['sidebar', collapsed ? 'mode-collapsed' : 'mode-expanded']" @click="closeMenu">
-    <div
-      v-for="ws in state.workspaces"
-      :key="ws.id"
-      :class="['ws', { active: ws.id === activeWorkspace?.id }]"
-      :title="ws.name"
-      @click.stop="activate(ws.id)"
-      @dblclick.stop="startRename(ws.id)"
-      @contextmenu="openContextMenu($event, ws.id)"
-    >
-      <div class="bar" />
-      <template v-if="editingId === ws.id">
-        <input
-          v-model="editValue"
-          autofocus
-          maxlength="20"
-          @blur="commitRename"
-          @keydown.enter="commitRename"
-          @keydown.escape="editingId = null"
-          @click.stop
-        />
-      </template>
-      <template v-else>
-        <div v-if="collapsed" class="icon">
-          {{ initialOf(ws.name, ws.icon) }}
+    <div class="ws-list">
+      <div v-for="ws in tree" :key="ws.id" class="ws-group">
+        <div
+          :class="['ws', { active: ws.isActiveWorkspace }]"
+          :title="ws.name"
+          @click.stop="activate(ws.id)"
+          @dblclick.stop="startRename(ws.id)"
+          @contextmenu="openContextMenu($event, ws.id)"
+        >
+          <div class="bar" />
+          <template v-if="editingId === ws.id">
+            <input
+              v-model="editValue"
+              autofocus
+              maxlength="20"
+              @blur="commitRename"
+              @keydown.enter="commitRename"
+              @keydown.escape="editingId = null"
+              @click.stop
+            />
+          </template>
+          <template v-else>
+            <div v-if="collapsed" class="icon">
+              {{ initialOf(ws.name, ws.icon) }}
+            </div>
+            <span v-else class="ws-name">{{ ws.name }}</span>
+          </template>
         </div>
-        <span v-else class="ws-name">{{ ws.name }}</span>
-      </template>
+        <div v-if="!collapsed && ws.sessions.length" class="sessions">
+          <div
+            v-for="s in ws.sessions"
+            :key="s.id"
+            :class="['session', { focused: s.isFocusedSession }]"
+            :title="s.displayName"
+            @click.stop="focusSession(ws.id, s.id)"
+          >
+            <Icon class="s-ico" :icon="terminalIcon" />
+            <span class="s-name">{{ s.displayName }}</span>
+          </div>
+        </div>
+      </div>
     </div>
     <button class="add" title="New workspace" @click.stop="addWorkspace">
       <Icon class="ico" :icon="plusIcon" />
@@ -180,6 +227,20 @@ const toggleIcon = computed<IconifyIcon>(() =>
   gap: 6px;
   user-select: none;
   overflow: hidden;
+}
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ws-group {
+  display: flex;
+  flex-direction: column;
 }
 .ws {
   position: relative;
@@ -227,7 +288,6 @@ input {
 .add {
   width: 44px;
   height: 36px;
-  margin-top: auto;
   background: transparent;
   border: 1px dashed #444;
   border-radius: 8px;
@@ -292,9 +352,45 @@ input {
   font-weight: 500;
 }
 .sidebar.mode-expanded .add { width: 100%; }
+.sidebar.mode-expanded .ws-list { align-items: stretch; }
 .sidebar.mode-expanded input {
   width: 100%;
   text-align: left;
+}
+.sessions {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+  padding-left: 8px;
+}
+.session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: #b8b8b8;
+  cursor: pointer;
+  font-size: 12px;
+}
+.session:hover {
+  background: #262626;
+  color: #e6e6e6;
+}
+.session.focused {
+  background: #223532;
+  color: #4ec9b0;
+}
+.session .s-ico {
+  flex-shrink: 0;
+  font-size: 14px;
+  opacity: 0.85;
+}
+.session .s-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .menu {
   position: fixed;

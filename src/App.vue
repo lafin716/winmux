@@ -24,6 +24,7 @@ import { useShellPanels } from "./composables/useShellPanels";
 import { RAIL_WIDTH } from "./lib/shell-panels";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
+  activateSessionTab,
   addTabToLeaf,
   collectAllLeaves,
   collectAllSessionIds,
@@ -354,10 +355,8 @@ function focusSessionByIndex(i: number) {
   if (!s) return;
   const ws = activeWorkspace.value;
   if (!ws) return;
-  const leaf = findLeafBySession(ws.layout, s.id);
-  if (!leaf) return;
-  leaf.activeTabId = s.id;
-  setFocusedLeaf(leaf.id);
+  const leafId = activateSessionTab(ws.layout, s.id);
+  if (leafId) setFocusedLeaf(leafId);
 }
 
 registerFocusSessionByIndex(focusSessionByIndex);

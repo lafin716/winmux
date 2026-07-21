@@ -1,0 +1,98 @@
+import { describe, it, expect } from "vitest";
+import { buildNavigatorTree } from "./navigator";
+
+describe("buildNavigatorTree", () => {
+  it("nests each session under the workspace named by its daemon-name prefix", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [
+        { id: "ws-a", name: "Alpha", index: 1 },
+        { id: "ws-b", name: "Beta", index: 2 },
+      ],
+      sessions: [
+        { id: "s1", name: "w1.session-1" },
+        { id: "s2", name: "w2.build" },
+        { id: "s3", name: "w1.logs" },
+      ],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: null,
+    });
+
+    expect(tree.map((w) => w.id)).toEqual(["ws-a", "ws-b"]);
+    expect(tree[0].sessions.map((s) => s.id)).toEqual(["s1", "s3"]);
+    expect(tree[1].sessions.map((s) => s.id)).toEqual(["s2"]);
+  });
+
+  it("flags the active workspace and only that one", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [
+        { id: "ws-a", name: "Alpha", index: 1 },
+        { id: "ws-b", name: "Beta", index: 2 },
+      ],
+      sessions: [],
+      activeWorkspaceId: "ws-b",
+      focusedSessionId: null,
+    });
+
+    expect(tree.map((w) => w.isActiveWorkspace)).toEqual([false, true]);
+  });
+
+  it("flags the focused session and exposes its un-prefixed display name", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [{ id: "ws-a", name: "Alpha", index: 1 }],
+      sessions: [
+        { id: "s1", name: "w1.session-1" },
+        { id: "s2", name: "w1.build" },
+      ],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: "s2",
+    });
+
+    const [first, second] = tree[0].sessions;
+    expect(first.isFocusedSession).toBe(false);
+    expect(second.isFocusedSession).toBe(true);
+    expect(first.displayName).toBe("session-1");
+    expect(second.displayName).toBe("build");
+  });
+
+  it("lists a workspace with no sessions as an empty branch", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [
+        { id: "ws-a", name: "Alpha", index: 1 },
+        { id: "ws-b", name: "Beta", index: 2 },
+      ],
+      sessions: [{ id: "s1", name: "w1.only" }],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: null,
+    });
+
+    expect(tree[1].id).toBe("ws-b");
+    expect(tree[1].sessions).toEqual([]);
+  });
+
+  it("drops sessions with no prefix or a prefix matching no workspace", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [{ id: "ws-a", name: "Alpha", index: 1 }],
+      sessions: [
+        { id: "s1", name: "w1.kept" },
+        { id: "s2", name: "orphan-no-prefix" },
+        { id: "s3", name: "w9.unmatched-index" },
+      ],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: null,
+    });
+
+    const allSessionIds = tree.flatMap((w) => w.sessions.map((s) => s.id));
+    expect(allSessionIds).toEqual(["s1"]);
+  });
+
+  it("returns an empty tree when there are no workspaces", () => {
+    expect(
+      buildNavigatorTree({
+        workspaces: [],
+        sessions: [{ id: "s1", name: "w1.session-1" }],
+        activeWorkspaceId: null,
+        focusedSessionId: null,
+      }),
+    ).toEqual([]);
+  });
+});

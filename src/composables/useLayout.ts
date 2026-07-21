@@ -32,6 +32,18 @@ export function findLeafBySession(root: LayoutNode, sessionId: string): LeafNode
   return null;
 }
 
+/**
+ * Activate a session's tab in whatever leaf holds it, returning that leaf's id
+ * (or null if the session isn't in this tree). Callers pair this with
+ * `setFocusedLeaf` to complete the focus path.
+ */
+export function activateSessionTab(root: LayoutNode, sessionId: string): string | null {
+  const leaf = findLeafBySession(root, sessionId);
+  if (!leaf) return null;
+  leaf.activeTabId = sessionId;
+  return leaf.id;
+}
+
 export function findLeafById(root: LayoutNode, leafId: string): LeafNode | null {
   if (isLeaf(root)) return root.id === leafId ? root : null;
   for (const child of root.children) {
