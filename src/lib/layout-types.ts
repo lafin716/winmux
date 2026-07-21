@@ -24,6 +24,10 @@ export interface WorkspaceSettings {
   defaultCwd: string;
   // Null inherits the global terminal preference.
   terminal: TerminalConfig | null;
+  // Pinned root of the right Explorer's file tree for this workspace. When
+  // unset the Explorer falls back to defaultCwd, then the focused session's cwd
+  // on first open. Persisted so each workspace remembers its own root.
+  explorerRoot?: string;
 }
 
 export interface TerminalTabSnapshot {

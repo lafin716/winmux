@@ -212,6 +212,79 @@ fn read_file_preview_sync(target: &str, cwd: Option<&str>) -> Result<FilePreview
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntryInfo {
+    name: String,
+    path: String,
+    is_dir: bool,
+    hidden: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirListing {
+    /// Canonical path of the directory that was read.
+    path: String,
+    entries: Vec<DirEntryInfo>,
+}
+
+/// Read a single directory's immediate entries for the Explorer tree. The tree
+/// loads one level at a time, so this never recurses. Entries are sorted
+/// directories-first then case-insensitively by name; dotfiles are surfaced but
+/// flagged `hidden` so the UI can dim them.
+#[tauri::command]
+pub async fn read_directory(path: String) -> Result<DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || read_directory_sync(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_directory_sync(path: &str) -> Result<DirListing, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("No directory to read.".to_string());
+    }
+    let canonical = PathBuf::from(trimmed)
+        .canonicalize()
+        .map_err(|e| format!("Directory not found: {trimmed} ({e})"))?;
+    if !canonical.is_dir() {
+        return Err(format!("Not a directory: {}", canonical.display()));
+    }
+    let entries = list_directory(&canonical)?;
+    Ok(DirListing {
+        path: canonical.to_string_lossy().into_owned(),
+        entries,
+    })
+}
+
+fn list_directory(dir: &std::path::Path) -> Result<Vec<DirEntryInfo>, String> {
+    let read = std::fs::read_dir(dir)
+        .map_err(|e| format!("Cannot read directory {}: {e}", dir.display()))?;
+    let mut entries: Vec<DirEntryInfo> = Vec::new();
+    for item in read {
+        let item = item.map_err(|e| e.to_string())?;
+        let name = item.file_name().to_string_lossy().into_owned();
+        let is_dir = item.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let hidden = name.starts_with('.');
+        entries.push(DirEntryInfo {
+            name,
+            path: item.path().to_string_lossy().into_owned(),
+            is_dir,
+            hidden,
+        });
+    }
+    entries.sort_by(|a, b| {
+        // Directories before files, then case-insensitive name, then a stable
+        // case-sensitive tiebreak so ordering is deterministic.
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(entries)
+}
+
 fn split_file_location(target: &str) -> (String, Option<u32>, Option<u32>) {
     let mut value = target
         .trim()
@@ -312,6 +385,91 @@ pub fn browser_reload(app: AppHandle, label: String) -> Result<(), String> {
     browser_webview(&app, &label)?
         .eval("location.reload()")
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("winmux-dir-test-{}-{}", tag, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn lists_entries_with_directories_first_then_case_insensitive_name() {
+        let dir = temp_dir("sorted");
+        fs::create_dir(dir.join("zeta")).unwrap();
+        fs::create_dir(dir.join("Alpha")).unwrap();
+        fs::write(dir.join("banana.txt"), b"x").unwrap();
+        fs::write(dir.join("Apple.txt"), b"x").unwrap();
+
+        let entries = super::list_directory(&dir).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["Alpha", "zeta", "Apple.txt", "banana.txt"]);
+        assert!(entries[0].is_dir);
+        assert!(entries[1].is_dir);
+        assert!(!entries[2].is_dir);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn flags_dotfiles_as_hidden_but_still_lists_them() {
+        let dir = temp_dir("hidden");
+        fs::write(dir.join(".env"), b"secret").unwrap();
+        fs::write(dir.join("visible.txt"), b"x").unwrap();
+
+        let entries = super::list_directory(&dir).unwrap();
+        let dotfile = entries
+            .iter()
+            .find(|e| e.name == ".env")
+            .expect("dotfile is still listed");
+        assert!(dotfile.hidden);
+        let visible = entries.iter().find(|e| e.name == "visible.txt").unwrap();
+        assert!(!visible.hidden);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reports_each_entry_full_path() {
+        let dir = temp_dir("paths");
+        fs::write(dir.join("file.txt"), b"x").unwrap();
+
+        let entries = super::list_directory(&dir).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, dir.join("file.txt").to_string_lossy());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn errors_when_the_target_is_not_a_directory() {
+        let dir = temp_dir("notdir");
+        let file = dir.join("a.txt");
+        fs::write(&file, b"x").unwrap();
+
+        assert!(super::read_directory_sync(file.to_str().unwrap()).is_err());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reads_a_directory_listing_through_the_sync_entry_point() {
+        let dir = temp_dir("listing");
+        fs::create_dir(dir.join("sub")).unwrap();
+        fs::write(dir.join("top.txt"), b"x").unwrap();
+
+        let listing = super::read_directory_sync(dir.to_str().unwrap()).unwrap();
+        let names: Vec<&str> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["sub", "top.txt"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }
 
 #[cfg(test)]

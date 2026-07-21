@@ -23,6 +23,18 @@ export interface FilePreview {
   column?: number | null;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  hidden: boolean;
+}
+
+export interface DirListing {
+  path: string;
+  entries: DirEntry[];
+}
+
 export interface PtyOutputPayload {
   id: string;
   data: string; // base64
@@ -64,6 +76,9 @@ export const api = {
   },
   readFilePreview(target: string, cwd?: string): Promise<FilePreview> {
     return invoke("read_file_preview", { target, cwd });
+  },
+  readDirectory(path: string): Promise<DirListing> {
+    return invoke("read_directory", { path });
   },
   browserNavigate(label: string, url: string): Promise<void> {
     return invoke("browser_navigate", { label, url });

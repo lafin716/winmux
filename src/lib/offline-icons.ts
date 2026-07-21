@@ -50,3 +50,24 @@ export const filesIcon: IconifyIcon = {
   height: 24,
   body: '<path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m8 1.5V8h4.5z"/>',
 };
+
+// Closed folder glyph for collapsed directories in the Explorer tree.
+export const folderIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8z"/>',
+};
+
+// Generic document glyph for files in the Explorer tree.
+export const fileIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M13 9V3.5L18.5 9M6 2c-1.1 0-2 .9-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>',
+};
+
+// "Sync to current terminal" glyph (circular refresh arrows).
+export const syncIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M12 4V1L8 5l4 4V6a6 6 0 0 1 6 6c0 1-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12a8 8 0 0 0-8-8m0 14a6 6 0 0 1-6-6c0-1 .25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12a8 8 0 0 0 8 8v3l4-4l-4-4z"/>',
+};
