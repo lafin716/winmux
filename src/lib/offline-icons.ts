@@ -29,3 +29,24 @@ export const plusIcon: IconifyIcon = {
   height: 24,
   body: '<path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>',
 };
+
+// Left panel toggle: framed layout with the left sidebar column emphasized.
+export const panelLeftIcon: IconifyIcon = {
+  width: 16,
+  height: 16,
+  body: '<path fill="currentColor" d="M0 3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm5-1v12h9a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1zM4 2H2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h2z"/>',
+};
+
+// Right panel toggle: framed layout with the right sidebar column emphasized.
+export const panelRightIcon: IconifyIcon = {
+  width: 16,
+  height: 16,
+  body: '<path fill="currentColor" d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm10 1h2a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-2zm-1 0v12H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>',
+};
+
+// Files tool glyph for the Explorer icon strip.
+export const filesIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m8 1.5V8h4.5z"/>',
+};

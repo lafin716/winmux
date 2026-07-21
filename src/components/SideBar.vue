@@ -4,7 +4,7 @@ import { Icon, type IconifyIcon } from "@iconify/vue";
 import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
 import { useResources } from "../composables/useResources";
-import { usePrefs, cycleSidebarMode } from "../composables/usePrefs";
+import { useShellPanels } from "../composables/useShellPanels";
 import { collectAllSessionIds, addTabToLeaf, findFirstLeaf } from "../composables/useLayout";
 import {
   chevronLeftIcon,
@@ -22,7 +22,9 @@ const {
 } = useWorkspaces();
 const { kill } = useSessions();
 const resources = useResources();
-const { prefs } = usePrefs();
+const { panels, toggleLeftCollapsed } = useShellPanels();
+
+const collapsed = computed(() => panels.left.collapsed);
 
 const editingId = ref<string | null>(null);
 const editValue = ref("");
@@ -99,28 +101,13 @@ function closeMenu() {
 
 const canDelete = computed(() => state.workspaces.length > 1);
 
-const toggleIcon = computed<IconifyIcon>(() => {
-  switch (prefs.sidebarMode) {
-    case "expanded":
-      return chevronLeftIcon;
-    case "compact":
-    case "minimal":
-    default:
-      return chevronRightIcon;
-  }
-});
-
-function onRootClick() {
-  if (prefs.sidebarMode === "minimal") {
-    cycleSidebarMode();
-    return;
-  }
-  closeMenu();
-}
+const toggleIcon = computed<IconifyIcon>(() =>
+  collapsed.value ? chevronRightIcon : chevronLeftIcon,
+);
 </script>
 
 <template>
-  <aside :class="['sidebar', 'mode-' + prefs.sidebarMode]" @click="onRootClick">
+  <aside :class="['sidebar', collapsed ? 'mode-collapsed' : 'mode-expanded']" @click="closeMenu">
     <div
       v-for="ws in state.workspaces"
       :key="ws.id"
@@ -143,10 +130,10 @@ function onRootClick() {
         />
       </template>
       <template v-else>
-        <div v-if="prefs.sidebarMode !== 'expanded'" class="icon">
+        <div v-if="collapsed" class="icon">
           {{ initialOf(ws.name, ws.icon) }}
         </div>
-        <span v-if="prefs.sidebarMode === 'expanded'" class="ws-name">{{ ws.name }}</span>
+        <span v-else class="ws-name">{{ ws.name }}</span>
       </template>
     </div>
     <button class="add" title="New workspace" @click.stop="addWorkspace">
@@ -154,9 +141,9 @@ function onRootClick() {
     </button>
     <button
       class="mode-toggle"
-      :class="'mt-' + prefs.sidebarMode"
-      :title="'Sidebar: ' + prefs.sidebarMode + ' (Ctrl+Shift+B)'"
-      @click.stop="cycleSidebarMode"
+      :class="collapsed ? 'mt-collapsed' : 'mt-expanded'"
+      :title="(collapsed ? 'Expand Navigator' : 'Collapse Navigator')"
+      @click.stop="toggleLeftCollapsed"
     >
       <Icon class="chev" :icon="toggleIcon" />
     </button>
@@ -182,7 +169,8 @@ function onRootClick() {
 <style scoped>
 .sidebar {
   position: relative;
-  width: 56px;
+  width: 100%;
+  height: 100%;
   background: #1b1b1b;
   border-right: 1px solid #111;
   display: flex;
@@ -191,7 +179,7 @@ function onRootClick() {
   padding: 6px 0;
   gap: 6px;
   user-select: none;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 .ws {
   position: relative;
@@ -206,6 +194,7 @@ function onRootClick() {
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 .ws:hover { background: #333; }
 .ws.active {
@@ -261,51 +250,28 @@ input {
   font-size: 12px;
   line-height: 1;
   color: #1a1a1a;
-  transition: background 120ms ease, transform 220ms ease, opacity 220ms ease;
+  background: #4ec9b0;
+  font-weight: 700;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: background 120ms ease;
 }
+.mode-toggle:hover { background: #5fd9c0; }
 .mode-toggle .chev {
   display: inline-block;
   font-size: 18px;
 }
-.mode-toggle.mt-compact {
+.mode-toggle.mt-collapsed {
   width: 44px;
   height: 28px;
-  border-radius: 6px;
-  background: #4ec9b0;
-  font-weight: 700;
-  flex-shrink: 0;
 }
-.mode-toggle.mt-compact:hover { background: #5fd9c0; }
 .mode-toggle.mt-expanded {
   width: 100%;
   height: 32px;
-  border-radius: 6px;
-  background: #4ec9b0;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.mode-toggle.mt-expanded:hover { background: #5fd9c0; }
-.mode-toggle.mt-minimal {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #4ec9b0;
-  transform: translate(-50%, -50%);
-  opacity: 0.55;
-  z-index: 20;
-}
-.sidebar.mode-minimal:hover .mode-toggle.mt-minimal,
-.mode-toggle.mt-minimal:hover {
-  transform: translate(0, -50%);
-  opacity: 1;
 }
 .ws-name { display: none; }
 
 .sidebar.mode-expanded {
-  width: 200px;
   align-items: stretch;
   padding: 6px 8px;
 }
@@ -330,23 +296,6 @@ input {
   width: 100%;
   text-align: left;
 }
-
-.sidebar.mode-minimal {
-  width: 6px;
-  padding: 0;
-  cursor: pointer;
-  gap: 0;
-}
-.sidebar.mode-minimal > *:not(.mode-toggle) { display: none; }
-.sidebar.mode-minimal::before {
-  content: "";
-  display: block;
-  width: 2px;
-  height: 100%;
-  margin: 0 auto;
-  background: #2a2a2a;
-}
-.sidebar.mode-minimal:hover::before { background: #4ec9b0; }
 .menu {
   position: fixed;
   z-index: 100;

@@ -4,8 +4,12 @@ import {
   savePrefs,
   type PaletteUiMode,
   type Prefs,
-  type SidebarMode,
 } from "../lib/persistence";
+import {
+  createDefaultPanelsState,
+  panelsFromStored,
+  serializePanels,
+} from "../lib/shell-panels";
 import {
   defaultTerminalConfig,
   normalizeTerminalConfig,
@@ -13,9 +17,9 @@ import {
 
 const prefs = reactive<Prefs>({
   skipKillSessionConfirm: false,
-  sidebarMode: "compact",
   defaultTerminal: defaultTerminalConfig(),
   paletteUiMode: "context",
+  panels: createDefaultPanelsState(),
 });
 
 export function loadPrefsFromStorage(): void {
@@ -24,23 +28,33 @@ export function loadPrefsFromStorage(): void {
   const paletteUiMode: PaletteUiMode = stored.paletteUiMode === "radial"
     ? "radial"
     : "context";
+  // Resolve panels from the stored payload, migrating the legacy `sidebarMode`
+  // preference when no `panels` payload is present.
+  const migratedFromLegacy = stored.panels === undefined && "sidebarMode" in stored;
+  const panels = panelsFromStored(stored);
   Object.assign(prefs, {
     ...stored,
     defaultTerminal: normalizeTerminalConfig(stored.defaultTerminal),
     paletteUiMode,
+    panels,
   });
+  // The legacy `sidebarMode` field is superseded by `panels`; don't keep it around.
+  if ("sidebarMode" in prefs) {
+    delete (prefs as Record<string, unknown>).sidebarMode;
+  }
+  // Persist once after a legacy migration so the old field is dropped from
+  // storage and subsequent launches read `panels` directly.
+  if (migratedFromLegacy) persistPrefs();
+}
+
+/** Persist the current prefs, snapshotting the reactive panel state to plain data. */
+export function persistPrefs(): void {
+  savePrefs({ ...prefs, panels: serializePanels(prefs.panels) });
 }
 
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
   prefs[key] = value;
-  savePrefs({ ...prefs });
-}
-
-const SIDEBAR_ORDER: SidebarMode[] = ["compact", "expanded", "minimal"];
-
-export function cycleSidebarMode(): void {
-  const i = SIDEBAR_ORDER.indexOf(prefs.sidebarMode);
-  setPref("sidebarMode", SIDEBAR_ORDER[(i + 1) % SIDEBAR_ORDER.length]);
+  persistPrefs();
 }
 
 export function usePrefs() {

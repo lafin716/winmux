@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { Icon } from "@iconify/vue";
 import { useKeybindings } from "../composables/useKeybindings";
+import { useShellPanels } from "../composables/useShellPanels";
 import { dispatchAction } from "../composables/useGlobalShortcuts";
 import { useSettings } from "../composables/useSettings";
 import { formatKeybinding, type ActionId } from "../lib/keybindings";
+import { panelLeftIcon, panelRightIcon } from "../lib/offline-icons";
 
 type MenuItem =
   | { kind: "action"; label: string; actionId: ActionId; disabled?: boolean }
@@ -19,9 +22,17 @@ interface MenuDef {
 
 const { bindingFor, prefixFor } = useKeybindings();
 const { openSettings } = useSettings();
+const { panels, toggleLeft, toggleRight } = useShellPanels();
 
 const openMenu = ref<string | null>(null);
 const rootRef = ref<HTMLDivElement | null>(null);
+
+const leftToggleTitle = computed(
+  () => `Toggle Left Panel  (${formatKeybinding(bindingFor("view.toggleLeftPanel"))})`,
+);
+const rightToggleTitle = computed(
+  () => `Toggle Right Panel  (${formatKeybinding(bindingFor("view.toggleRightPanel"))})`,
+);
 
 async function quitApp() {
   try {
@@ -141,6 +152,15 @@ onUnmounted(() => {
 
 <template>
   <div ref="rootRef" class="menubar">
+    <button
+      class="corner-toggle"
+      :class="{ active: panels.left.open }"
+      :title="leftToggleTitle"
+      type="button"
+      @click="toggleLeft"
+    >
+      <Icon class="ico" :icon="panelLeftIcon" />
+    </button>
     <div
       v-for="m in menus"
       :key="m.id"
@@ -165,6 +185,16 @@ onUnmounted(() => {
         </template>
       </div>
     </div>
+    <div class="spacer" />
+    <button
+      class="corner-toggle"
+      :class="{ active: panels.right.open }"
+      :title="rightToggleTitle"
+      type="button"
+      @click="toggleRight"
+    >
+      <Icon class="ico" :icon="panelRightIcon" />
+    </button>
   </div>
 </template>
 
@@ -193,6 +223,24 @@ onUnmounted(() => {
   background: #3a3a3a;
 }
 .label { line-height: 1; }
+.spacer { flex: 1; }
+.corner-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  border: none;
+  background: transparent;
+  color: #9a9a9a;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.corner-toggle:hover {
+  background: #3a3a3a;
+  color: #d4d4d4;
+}
+.corner-toggle.active { color: #4ec9b0; }
+.corner-toggle .ico { font-size: 15px; }
 .dropdown {
   position: absolute;
   top: 100%;

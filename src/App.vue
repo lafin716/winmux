@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import SideBar from "./components/SideBar.vue";
+import ExplorerPanel from "./components/ExplorerPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import SplitContainer from "./components/SplitContainer.vue";
 import MenuBar from "./components/MenuBar.vue";
@@ -16,9 +17,11 @@ import { useKeybindings, loadKeybindingsFromStorage } from "./composables/useKey
 import { useGlobalShortcuts, registerAction, registerFocusSessionByIndex } from "./composables/useGlobalShortcuts";
 import { useSettings } from "./composables/useSettings";
 import { useConfirm } from "./composables/useConfirm";
-import { loadPrefsFromStorage, cycleSidebarMode } from "./composables/usePrefs";
+import { loadPrefsFromStorage } from "./composables/usePrefs";
 import { loadPaletteFromStorage } from "./composables/usePalette";
 import { useResources } from "./composables/useResources";
+import { useShellPanels } from "./composables/useShellPanels";
+import { RAIL_WIDTH } from "./lib/shell-panels";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
   addTabToLeaf,
@@ -58,7 +61,38 @@ const { settingsOpen, openSettings } = useSettings();
 const { prefixFor } = useKeybindings();
 const { confirm } = useConfirm();
 const resources = useResources();
+const { panels, toggleLeft, toggleRight, resize, commit } = useShellPanels();
 useGlobalShortcuts();
+
+// Between-region splitter drag: resize a panel's width in px while the center
+// content flexes to fill the rest. Widths are clamped to the panel's minimum;
+// state is persisted once the drag ends (see useShellPanels).
+function startRegionResize(side: "left" | "right", ev: MouseEvent) {
+  ev.preventDefault();
+  const startX = ev.clientX;
+  const startWidth = panels[side].width;
+  const sign = side === "left" ? 1 : -1;
+
+  function onMove(e: MouseEvent) {
+    resize(side, startWidth + sign * (e.clientX - startX));
+  }
+  function onUp() {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    commit();
+  }
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+const leftRegionStyle = computed(() => ({
+  width: `${panels.left.collapsed ? RAIL_WIDTH : panels.left.width}px`,
+}));
+const rightRegionStyle = computed(() => ({ width: `${panels.right.width}px` }));
 
 async function bootstrap() {
   loadPrefsFromStorage();
@@ -306,7 +340,8 @@ const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
   "pane.quadrantTopRight": () => quadrantSplit("tr"),
   "pane.quadrantBottomLeft": () => quadrantSplit("bl"),
   "pane.quadrantBottomRight": () => quadrantSplit("br"),
-  "view.cycleSidebar": () => cycleSidebarMode(),
+  "view.toggleLeftPanel": () => toggleLeft(),
+  "view.toggleRightPanel": () => toggleRight(),
 };
 
 for (const a of ACTIONS) {
@@ -349,9 +384,26 @@ onMounted(bootstrap);
   <div class="app">
     <MenuBar />
     <div class="main">
-      <SideBar />
+      <div v-if="panels.left.open" class="region region-left" :style="leftRegionStyle">
+        <SideBar />
+      </div>
+      <div
+        v-if="panels.left.open && !panels.left.collapsed"
+        class="region-splitter"
+        title="Drag to resize"
+        @mousedown="startRegionResize('left', $event)"
+      />
       <div class="content">
         <SplitContainer v-if="activeWorkspace" :key="activeWorkspace.id" :node="activeWorkspace.layout" />
+      </div>
+      <div
+        v-if="panels.right.open"
+        class="region-splitter"
+        title="Drag to resize"
+        @mousedown="startRegionResize('right', $event)"
+      />
+      <div v-if="panels.right.open" class="region region-right" :style="rightRegionStyle">
+        <ExplorerPanel />
       </div>
     </div>
     <StatusBar />
@@ -399,6 +451,20 @@ html, body, #app {
   display: flex;
   flex: 1;
   min-height: 0;
+}
+.region {
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.region-splitter {
+  flex: 0 0 4px;
+  background: #111;
+  cursor: col-resize;
+  z-index: 1;
+}
+.region-splitter:hover {
+  background: #4ec9b0;
 }
 .content {
   flex: 1;

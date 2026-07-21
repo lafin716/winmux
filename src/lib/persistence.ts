@@ -1,6 +1,7 @@
 import type { LayoutNode, TerminalTabSnapshot, WorkspaceStore } from "./layout-types";
 import type { Keybinding } from "./keybindings";
 import type { TerminalConfig } from "./terminal-config";
+import type { ShellPanelsState } from "./shell-panels";
 
 const STORAGE_KEY = "winmux:workspaces:v1";
 const KEYBINDINGS_KEY = "winmux:keybindings:v1";
@@ -17,19 +18,27 @@ interface PersistedKeybindings {
   bindings: Record<string, Keybinding>;
 }
 
-export type SidebarMode = "compact" | "expanded" | "minimal";
 export type PaletteUiMode = "context" | "radial";
 
 export interface Prefs {
   skipKillSessionConfirm: boolean;
-  sidebarMode: SidebarMode;
   defaultTerminal: TerminalConfig;
   paletteUiMode: PaletteUiMode;
+  panels: ShellPanelsState;
 }
+
+/**
+ * Prefs as they may appear on disk, including fields written by older versions
+ * (e.g. the legacy `sidebarMode` replaced by `panels`). Loaded prefs are
+ * normalized/migrated into the strict {@link Prefs} shape on read.
+ */
+export type StoredPrefs = Partial<Prefs> & {
+  sidebarMode?: string;
+};
 
 interface PersistedPrefs {
   version: 1;
-  prefs: Prefs;
+  prefs: StoredPrefs;
 }
 
 export function loadWorkspaces(): WorkspaceStore | null {
@@ -141,7 +150,7 @@ export function saveKeybindings(bindings: Record<string, Keybinding>): void {
   }
 }
 
-export function loadPrefs(): Prefs | null {
+export function loadPrefs(): StoredPrefs | null {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return null;
