@@ -19,6 +19,10 @@ export interface NavigatorSessionNode {
   /** Un-prefixed label shown in the Navigator. */
   displayName: string;
   isFocusedSession: boolean;
+  /** Unseen output activity while unfocused — badged as a dot. */
+  hasActivity: boolean;
+  /** Rang a real bell — badged as a bell glyph, takes visual precedence. */
+  hasBell: boolean;
 }
 
 export interface NavigatorWorkspaceNode {
@@ -35,10 +39,17 @@ export interface NavigatorInput {
   sessions: Pick<SessionInfo, "id" | "name">[];
   activeWorkspaceId: string | null;
   focusedSessionId: string | null;
+  /**
+   * Transient per-Session activity flags (the M4 `useSessions` map), keyed by
+   * session id. Optional; sessions absent from it get no badge. The focused
+   * Session is cleared upstream, so it naturally carries no flags here.
+   */
+  activityById?: Record<string, { output: boolean; bell: boolean }>;
 }
 
 export function buildNavigatorTree(input: NavigatorInput): NavigatorWorkspaceNode[] {
   const { workspaces, sessions, activeWorkspaceId, focusedSessionId } = input;
+  const activityById = input.activityById ?? {};
 
   // Bucket sessions by the Workspace index in their prefix. Sessions with no
   // prefix, or a prefix matching no Workspace, stay orphaned and are dropped.
@@ -46,11 +57,14 @@ export function buildNavigatorTree(input: NavigatorInput): NavigatorWorkspaceNod
   for (const s of sessions) {
     const index = workspaceIndexOf(s.name);
     if (index === null) continue;
+    const activity = activityById[s.id];
     const node: NavigatorSessionNode = {
       id: s.id,
       name: s.name,
       displayName: displayName(s.name),
       isFocusedSession: s.id === focusedSessionId,
+      hasActivity: activity?.output ?? false,
+      hasBell: activity?.bell ?? false,
     };
     const bucket = byIndex.get(index);
     if (bucket) bucket.push(node);

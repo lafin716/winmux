@@ -14,6 +14,7 @@ import {
 } from "../composables/useLayout";
 import { buildNavigatorTree } from "../lib/navigator";
 import {
+  bellIcon,
   chevronLeftIcon,
   chevronRightIcon,
   plusIcon,
@@ -27,7 +28,7 @@ const {
   renameWorkspace,
   setActiveWorkspace,
 } = useWorkspaces();
-const { state: sessState, focusedSession, kill } = useSessions();
+const { state: sessState, focusedSession, activity, kill } = useSessions();
 const { setFocusedLeaf } = useFocus();
 const resources = useResources();
 const { panels, toggleLeftCollapsed } = useShellPanels();
@@ -43,6 +44,7 @@ const tree = computed(() =>
     sessions: sessState.sessions,
     activeWorkspaceId: state.activeWorkspaceId,
     focusedSessionId: focusedSession.value?.id ?? null,
+    activityById: activity,
   }),
 );
 
@@ -179,6 +181,17 @@ const toggleIcon = computed<IconifyIcon>(() =>
           >
             <Icon class="s-ico" :icon="terminalIcon" />
             <span class="s-name">{{ s.displayName }}</span>
+            <Icon
+              v-if="s.hasBell"
+              class="s-badge bell"
+              :icon="bellIcon"
+              title="Rang the bell"
+            />
+            <span
+              v-else-if="s.hasActivity"
+              class="s-badge dot"
+              title="New output"
+            />
           </div>
         </div>
       </div>
@@ -388,9 +401,28 @@ input {
   opacity: 0.85;
 }
 .session .s-name {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.session .s-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.session .s-badge.bell {
+  font-size: 13px;
+  color: #e2b341;
+}
+.session .s-badge.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ec9b0;
+}
+/* The focused Session is cleared upstream, but guard against a residual badge. */
+.session.focused .s-badge {
+  display: none;
 }
 .menu {
   position: fixed;

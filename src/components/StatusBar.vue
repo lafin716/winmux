@@ -1,10 +1,23 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { Icon } from "@iconify/vue";
 import { useSessions, displayName } from "../composables/useSessions";
 import { useWorkspaces } from "../composables/useWorkspaces";
+import { bellIcon } from "../lib/offline-icons";
 
-const { workspaceSessions, focusedSession } = useSessions();
+const { workspaceSessions, focusedSession, sessionActivity } = useSessions();
 const { activeWorkspace } = useWorkspaces();
+
+// Same badge as the Navigator, scoped to the active Workspace's Session strip:
+// bell takes precedence over plain output; the focused Session shows none.
+function badgeFor(id: string): "bell" | "dot" | null {
+  if (focusedSession.value?.id === id) return null;
+  const flags = sessionActivity(id);
+  if (!flags) return null;
+  if (flags.bell) return "bell";
+  if (flags.output) return "dot";
+  return null;
+}
 const time = ref(formatNow());
 let timer: number | null = null;
 
@@ -41,6 +54,8 @@ onUnmounted(() => {
       <span v-for="(s, i) in workspaceSessions" :key="s.id"
             :class="['win', { active: focusedSession?.id === s.id }]">
         {{ sessionLabel(i) }}:{{ displayName(s.name) }}
+        <Icon v-if="badgeFor(s.id) === 'bell'" class="badge-ico bell" :icon="bellIcon" />
+        <span v-else-if="badgeFor(s.id) === 'dot'" class="badge-ico dot" />
       </span>
     </div>
     <div class="right">
@@ -78,11 +93,29 @@ onUnmounted(() => {
   font-weight: bold;
 }
 .ws { font-weight: 600; }
-.win { opacity: 0.7; }
+.win {
+  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .win.active {
   background: #1a1a1a;
   color: #4ec9b0;
   padding: 0 6px;
   opacity: 1;
+}
+.badge-ico {
+  flex-shrink: 0;
+}
+.badge-ico.bell {
+  font-size: 12px;
+  color: #8a5a00;
+}
+.badge-ico.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #1a1a1a;
 }
 </style>

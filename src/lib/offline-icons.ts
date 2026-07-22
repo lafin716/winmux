@@ -85,3 +85,10 @@ export const commandIcon: IconifyIcon = {
   height: 24,
   body: '<path fill="currentColor" d="M5.7 7.4L10.3 12l-4.6 4.6L7.1 18l6-6l-6-6zM13 16h6v2h-6z"/>',
 };
+
+// Bell glyph for the Navigator/StatusBar activity badge (a Session rang a bell).
+export const bellIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M21 19v1H3v-1l2-2v-6c0-3.1 2.03-5.83 5-6.71V4a2 2 0 0 1 2-2a2 2 0 0 1 2 2v.29c2.97.88 5 3.61 5 6.71v6zm-7 2a2 2 0 0 1-2 2a2 2 0 0 1-2-2z"/>',
+};

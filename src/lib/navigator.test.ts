@@ -95,4 +95,42 @@ describe("buildNavigatorTree", () => {
       }),
     ).toEqual([]);
   });
+
+  it("flags each session's unseen activity from the activity map", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [{ id: "ws-a", name: "Alpha", index: 1 }],
+      sessions: [
+        { id: "s1", name: "w1.plain" },
+        { id: "s2", name: "w1.rang" },
+        { id: "s3", name: "w1.quiet" },
+      ],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: null,
+      activityById: {
+        s1: { output: true, bell: false },
+        s2: { output: true, bell: true },
+      },
+    });
+
+    const [s1, s2, s3] = tree[0].sessions;
+    expect(s1.hasActivity).toBe(true);
+    expect(s1.hasBell).toBe(false);
+    expect(s2.hasActivity).toBe(true);
+    expect(s2.hasBell).toBe(true);
+    expect(s3.hasActivity).toBe(false);
+    expect(s3.hasBell).toBe(false);
+  });
+
+  it("defaults activity flags to false when no activity map is given", () => {
+    const tree = buildNavigatorTree({
+      workspaces: [{ id: "ws-a", name: "Alpha", index: 1 }],
+      sessions: [{ id: "s1", name: "w1.only" }],
+      activeWorkspaceId: "ws-a",
+      focusedSessionId: null,
+    });
+
+    const [only] = tree[0].sessions;
+    expect(only.hasActivity).toBe(false);
+    expect(only.hasBell).toBe(false);
+  });
 });
