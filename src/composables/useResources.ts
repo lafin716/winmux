@@ -15,6 +15,8 @@ export interface FileTab {
   kind: "file";
   id: string;
   preview: FilePreview;
+  /** True while the editor holds unsaved changes; drives the tab dirty dot. */
+  dirty?: boolean;
 }
 
 export interface BrowserTab {
@@ -126,6 +128,20 @@ export function useResources() {
     if (tab?.kind === "browser") tab.url = normalizeUrl(url);
   }
 
+  function setFileDirty(id: string, dirty: boolean): void {
+    const tab = state.tabs[id];
+    if (tab?.kind === "file") tab.dirty = dirty;
+  }
+
+  // After a successful save, adopt the written text as the tab's stored content
+  // so a re-focused/re-opened tab shows what was saved, and clear dirty.
+  function updateFilePreviewText(id: string, text: string): void {
+    const tab = state.tabs[id];
+    if (tab?.kind !== "file") return;
+    tab.preview.text = text;
+    tab.dirty = false;
+  }
+
   function forgetResource(id: string): void {
     delete state.tabs[id];
   }
@@ -138,5 +154,7 @@ export function useResources() {
     closeResource,
     forgetResource,
     updateBrowserUrl,
+    setFileDirty,
+    updateFilePreviewText,
   };
 }

@@ -16,14 +16,22 @@ import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import MarkdownIt from "markdown-it";
-import { base64ToBytes, type FilePreview } from "../lib/tauri";
+import { api, base64ToBytes, type FilePreview } from "../lib/tauri";
 import { resolveViewerMode } from "../lib/viewer-mode";
+import { useResources } from "../composables/useResources";
 
-const props = defineProps<{ preview: FilePreview }>();
+const props = defineProps<{ preview: FilePreview; tabId: string }>();
+
+const resources = useResources();
 
 const editorHost = ref<HTMLDivElement | null>(null);
 let editor: monaco.editor.IStandaloneCodeEditor | null = null;
 let model: monaco.editor.ITextModel | null = null;
+
+// Baseline the dirty check compares against: the last text written to disk
+// (initially the loaded content). Ctrl+S advances it on a successful save.
+let lastSaved = props.preview.text ?? "";
+const saveError = ref<string | null>(null);
 
 // `html: false` keeps embedded raw HTML/scripts inert — markdown-it escapes
 // them rather than emitting them, so opening an untrusted file is safe.
@@ -82,10 +90,12 @@ async function createEditor() {
     monacoLanguage(props.preview.language),
     monaco.Uri.file(props.preview.canonicalPath),
   );
+  // Only the `text` view mode reaches here (early return above), so the editor
+  // is always editable; Markdown/PDF/image are separate read-only views.
   editor = monaco.editor.create(editorHost.value, {
     model,
-    readOnly: true,
-    domReadOnly: true,
+    readOnly: false,
+    domReadOnly: false,
     theme: "vs-dark",
     automaticLayout: true,
     minimap: { enabled: false },
@@ -102,6 +112,38 @@ async function createEditor() {
       column: props.preview.column ?? 1,
     });
     editor.revealLineInCenter(props.preview.line);
+  }
+
+  // Dirty = current text differs from the last-saved baseline.
+  editor.onDidChangeModelContent(() => {
+    resources.setFileDirty(props.tabId, model?.getValue() !== lastSaved);
+  });
+
+  // Ctrl+S saves; binding it on the editor also suppresses the browser's own
+  // save dialog while the editor is focused.
+  editor.addAction({
+    id: "winmux.saveFile",
+    label: "Save File",
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    run: () => {
+      void save();
+    },
+  });
+}
+
+async function save() {
+  if (!model) return;
+  const text = model.getValue();
+  try {
+    await api.writeFile(props.preview.canonicalPath, text);
+    lastSaved = text;
+    saveError.value = null;
+    // Adopts the saved text as the tab's stored content and clears dirty.
+    resources.updateFilePreviewText(props.tabId, text);
+  } catch (e) {
+    // Surface the failure and keep the dirty flag so the edit isn't lost.
+    saveError.value = String(e);
+    console.error("Failed to save file:", e);
   }
 }
 
@@ -123,6 +165,7 @@ onBeforeUnmount(() => {
     <div class="toolbar">
       <span class="path" :title="preview.canonicalPath">{{ preview.canonicalPath }}</span>
       <button v-if="mode === 'text'" title="Find (Ctrl+F)" @click="openFind">Find</button>
+      <span v-if="saveError" class="save-error" :title="saveError">Save failed</span>
       <span class="meta">{{ preview.language }} · {{ preview.size.toLocaleString() }} bytes</span>
     </div>
 
@@ -174,6 +217,11 @@ onBeforeUnmount(() => {
   flex: 1;
 }
 .meta { color: #888; white-space: nowrap; }
+.save-error {
+  color: #f48771;
+  white-space: nowrap;
+  cursor: default;
+}
 button {
   background: #1e1e1e;
   color: #ddd;

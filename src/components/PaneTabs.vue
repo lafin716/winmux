@@ -129,6 +129,11 @@ function fileTab(id: string | null): FileTab | null {
   return tab?.kind === "file" ? tab : null;
 }
 
+function isFileDirty(id: string): boolean {
+  const tab = resources.getById(id);
+  return tab?.kind === "file" && !!tab.dirty;
+}
+
 function browserTab(id: string): BrowserTab | null {
   const tab = resources.getById(id);
   return tab?.kind === "browser" ? tab : null;
@@ -489,6 +494,11 @@ onUnmounted(() => {
           <template v-else>
             <span class="kind-icon">{{ tabIcon(id) }}</span>
             <span class="name">{{ sessionName(id) }}</span>
+            <span
+              v-if="isFileDirty(id)"
+              class="dirty-dot"
+              title="Unsaved changes"
+            >●</span>
           </template>
           <span class="close" @click="closeTab(id, $event)">×</span>
         </div>
@@ -611,6 +621,7 @@ onUnmounted(() => {
         v-if="fileTab(leaf.activeTabId)"
         :key="leaf.activeTabId ?? 'file'"
         :preview="fileTab(leaf.activeTabId)!.preview"
+        :tab-id="fileTab(leaf.activeTabId)!.id"
       />
       <template v-for="id in leaf.tabs" :key="'browser-' + id">
         <BrowserView
@@ -684,6 +695,11 @@ onUnmounted(() => {
   color: #4ec9b0;
   font-family: Consolas, monospace;
   font-size: 11px;
+}
+.dirty-dot {
+  color: #4ec9b0;
+  font-size: 10px;
+  line-height: 1;
 }
 .close {
   opacity: 0.4;

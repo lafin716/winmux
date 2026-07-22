@@ -91,6 +91,7 @@ pub fn run() {
             commands::attach_session,
             commands::rename_session,
             commands::read_file_preview,
+            commands::write_file,
             commands::read_directory,
             commands::list_files,
             commands::browser_navigate,

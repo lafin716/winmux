@@ -87,6 +87,9 @@ export const api = {
   readFilePreview(target: string, cwd?: string): Promise<FilePreview> {
     return invoke("read_file_preview", { target, cwd });
   },
+  writeFile(path: string, contents: string): Promise<void> {
+    return invoke("write_file", { path, contents });
+  },
   readDirectory(path: string): Promise<DirListing> {
     return invoke("read_directory", { path });
   },

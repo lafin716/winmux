@@ -229,6 +229,25 @@ fn read_file_preview_sync(target: &str, cwd: Option<&str>) -> Result<FilePreview
     }
 }
 
+/// Write `contents` to `path`, overwriting any existing file. Mirrors the
+/// established command shape: a thin async wrapper delegating to the
+/// synchronous, unit-testable [`write_file_sync`] via `spawn_blocking`. Backs
+/// the FileViewer's Ctrl+S save.
+#[tauri::command]
+pub async fn write_file(path: String, contents: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || write_file_sync(&path, &contents))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn write_file_sync(path: &str, contents: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("No file to write.".to_string());
+    }
+    std::fs::write(trimmed, contents).map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirEntryInfo {
@@ -720,6 +739,58 @@ mod resource_tests {
         assert_eq!(path, r#"C:\work dir\main.ts"#);
         assert_eq!(line, Some(8));
         assert_eq!(column, Some(2));
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("winmux-write-test-{}-{}", tag, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn writes_contents_and_reads_back_equal() {
+        let dir = temp_dir("roundtrip");
+        let file = dir.join("note.txt");
+        let contents = "hello\nworld\n";
+
+        super::write_file_sync(file.to_str().unwrap(), contents).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), contents);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn overwrites_an_existing_file() {
+        let dir = temp_dir("overwrite");
+        let file = dir.join("note.txt");
+        fs::write(&file, b"original body").unwrap();
+
+        super::write_file_sync(file.to_str().unwrap(), "replaced").unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "replaced");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn errors_when_the_target_is_a_directory() {
+        let dir = temp_dir("dir-target");
+
+        // Writing to a directory path must fail rather than silently succeed.
+        assert!(super::write_file_sync(dir.to_str().unwrap(), "nope").is_err());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn errors_on_an_empty_path() {
+        assert!(super::write_file_sync("   ", "body").is_err());
     }
 }
 
