@@ -24,6 +24,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { openPalette } from "../composables/usePalette";
 import { useResources } from "../composables/useResources";
 import { useSessions } from "../composables/useSessions";
+import { FILE_DRAG_MIME, formatPathForInsertion } from "../lib/path-insert";
 
 const props = defineProps<{
   sessionId: string;
@@ -343,6 +344,26 @@ function onHostAuxClick(ev: MouseEvent) {
   ev.stopPropagation();
 }
 
+// A file dragged from the Explorer carries its absolute path on FILE_DRAG_MIME.
+// Only allow the drop for that payload (preventDefault enables it) so unrelated
+// drags — including Pane-tab drags (text/plain) — are left untouched.
+function onHostDragOver(ev: DragEvent) {
+  if (!ev.dataTransfer?.types.includes(FILE_DRAG_MIME)) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "copy";
+}
+
+function onHostDrop(ev: DragEvent) {
+  const path = ev.dataTransfer?.getData(FILE_DRAG_MIME);
+  if (!path) return; // directory / non-file / unrelated drag — ignore
+  ev.preventDefault();
+  // Write the (quoted-if-spaced) path to the PTY the same way typed/pasted text
+  // is written. No newline: the path is inserted, not executed.
+  api.writeSession(props.sessionId, stringToBase64(formatPathForInsertion(path)))
+    .catch((e) => console.error("write failed", e));
+  term?.focus();
+}
+
 function safeFit() {
   if (!fitAddon || !term || !host.value) return;
   if (host.value.offsetWidth === 0 || host.value.offsetHeight === 0) return;
@@ -409,7 +430,12 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="host" class="term-host" />
+  <div
+    ref="host"
+    class="term-host"
+    @dragover="onHostDragOver"
+    @drop="onHostDrop"
+  />
 </template>
 
 <style scoped>

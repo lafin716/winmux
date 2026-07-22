@@ -14,6 +14,7 @@ import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
 import { useResources } from "../composables/useResources";
 import { resolveExplorerRoot, syncExplorerRoot } from "../lib/explorer-root";
+import { FILE_DRAG_MIME } from "../lib/path-insert";
 
 // The Explorer renders a file tree behind the Files icon strip. The tree is
 // rooted at the active Workspace's pinned root (see `explorer-root`), loads one
@@ -152,6 +153,16 @@ async function activate(node: TreeNode): Promise<void> {
   }
 }
 
+// Start a file drag carrying the file's absolute path on a winmux-specific MIME
+// type, so dropping it on a Terminal inserts the path (see Terminal.vue) without
+// clashing with Pane-tab drags. Directory rows are not draggable. Click-to-open
+// still works — a click that isn't a drag falls through to `activate`.
+function onRowDragStart(ev: DragEvent, node: TreeNode): void {
+  if (node.isDir || !ev.dataTransfer) return;
+  ev.dataTransfer.effectAllowed = "copy";
+  ev.dataTransfer.setData(FILE_DRAG_MIME, node.path);
+}
+
 // Flatten the expanded tree into visible rows with depth, for a simple list
 // render (no per-level recursion in the template).
 interface Row {
@@ -213,7 +224,9 @@ const canSync = computed(() => !!focusedCwd.value);
             :class="['row', { dir: node.isDir, hidden: node.hidden }]"
             :style="{ paddingLeft: 6 + depth * 12 + 'px' }"
             :title="node.name"
+            :draggable="!node.isDir"
             @click="activate(node)"
+            @dragstart="onRowDragStart($event, node)"
           >
             <Icon
               v-if="node.isDir"
