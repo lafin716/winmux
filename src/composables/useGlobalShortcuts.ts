@@ -3,6 +3,7 @@ import { ACTIONS, matchesEvent, type ActionId } from "../lib/keybindings";
 import { useKeybindings } from "./useKeybindings";
 import { useSettings } from "./useSettings";
 import { confirmState } from "./useConfirm";
+import { quickOpenState } from "./useQuickOpen";
 
 type Handler = () => void | Promise<void>;
 
@@ -43,6 +44,9 @@ export function useGlobalShortcuts() {
     if (settingsOpen.value) return;
     // Confirm modal also owns the keyboard while open (Esc/Enter, prevent stacking).
     if (confirmState.open) return;
+    // Quick Open owns the keyboard while open (typing, ↑/↓/Enter/Esc); its own
+    // handler drives navigation, so suspend all other shortcuts underneath it.
+    if (quickOpenState.open) return;
 
     // Never swallow plain typing in inputs/textareas. Modifier-bearing combos still pass.
     const hasMod = ev.ctrlKey || ev.metaKey || ev.altKey;

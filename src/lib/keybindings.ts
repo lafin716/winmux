@@ -38,6 +38,7 @@ export const ACTIONS: ReadonlyArray<ActionDef> = [
   { id: "pane.quadrantBottomRight", label: "Quadrant Bottom-Right Split",     category: "pane",    default: { ctrl: true, alt: true, key: "l" },             defaultPrefix: null },
   { id: "view.toggleLeftPanel",     label: "Toggle Left Panel (Navigator)",   category: "window",  default: { ctrl: true, shift: true, key: "b" },           defaultPrefix: null },
   { id: "view.toggleRightPanel",    label: "Toggle Right Panel (Explorer)",   category: "window",  default: { ctrl: true, shift: true, key: "e" },           defaultPrefix: null },
+  { id: "view.quickOpen",           label: "Quick Open",                      category: "window",  default: { ctrl: true, key: "p" },                       defaultPrefix: null },
 ];
 
 export type ActionId = (typeof ACTIONS)[number]["id"];

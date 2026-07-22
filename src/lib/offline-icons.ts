@@ -71,3 +71,17 @@ export const syncIcon: IconifyIcon = {
   height: 24,
   body: '<path fill="currentColor" d="M12 4V1L8 5l4 4V6a6 6 0 0 1 6 6c0 1-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12a8 8 0 0 0-8-8m0 14a6 6 0 0 1-6-6c0-1 .25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12a8 8 0 0 0 8 8v3l4-4l-4-4z"/>',
 };
+
+// Workspace glyph for Quick Open results (2x2 layout grid).
+export const workspaceIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/>',
+};
+
+// Command glyph for Quick Open results (shell prompt `>_`).
+export const commandIcon: IconifyIcon = {
+  width: 24,
+  height: 24,
+  body: '<path fill="currentColor" d="M5.7 7.4L10.3 12l-4.6 4.6L7.1 18l6-6l-6-6zM13 16h6v2h-6z"/>',
+};

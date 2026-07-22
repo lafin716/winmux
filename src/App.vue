@@ -9,6 +9,7 @@ import MenuBar from "./components/MenuBar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import ConfirmModal from "./components/ConfirmModal.vue";
 import PalettePopover from "./components/PalettePopover.vue";
+import QuickOpen from "./components/QuickOpen.vue";
 import { useSessions, nextDaemonName, displayName } from "./composables/useSessions";
 import { useWorkspaces, loadFromStorage, workspaceDefaultCwd } from "./composables/useWorkspaces";
 import { useFocus } from "./composables/useFocus";
@@ -20,6 +21,7 @@ import { useConfirm } from "./composables/useConfirm";
 import { loadPrefsFromStorage } from "./composables/usePrefs";
 import { loadPaletteFromStorage } from "./composables/usePalette";
 import { useResources } from "./composables/useResources";
+import { useQuickOpen } from "./composables/useQuickOpen";
 import { useShellPanels } from "./composables/useShellPanels";
 import { RAIL_WIDTH } from "./lib/shell-panels";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
@@ -62,6 +64,7 @@ const { settingsOpen, openSettings } = useSettings();
 const { prefixFor } = useKeybindings();
 const { confirm } = useConfirm();
 const resources = useResources();
+const { open: openQuickOpen } = useQuickOpen();
 const { panels, toggleLeft, toggleRight, resize, commit } = useShellPanels();
 useGlobalShortcuts();
 
@@ -343,6 +346,7 @@ const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
   "pane.quadrantBottomRight": () => quadrantSplit("br"),
   "view.toggleLeftPanel": () => toggleLeft(),
   "view.toggleRightPanel": () => toggleRight(),
+  "view.quickOpen": () => openQuickOpen(),
 };
 
 for (const a of ACTIONS) {
@@ -406,6 +410,7 @@ onMounted(bootstrap);
       </div>
     </div>
     <StatusBar />
+    <QuickOpen />
     <SettingsModal v-if="settingsOpen" />
     <ConfirmModal />
     <PalettePopover />
