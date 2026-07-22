@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
+use base64::Engine;
 use clap::{Parser, Subcommand};
 use uuid::Uuid;
 use winmux_lib::ipc::client::DaemonClient;
-use winmux_lib::ipc::protocol::Method;
+use winmux_lib::ipc::protocol::{AttachResult, Method};
 use winmux_lib::pty::SessionInfo;
 
 #[derive(Parser)]
@@ -24,6 +25,10 @@ enum Cmd {
         /// Session name
         #[arg(short = 's', long)]
         name: Option<String>,
+        /// Workspace index; prefixes the name as `w{index}.{name}` so the
+        /// session appears in that workspace's GUI Navigator
+        #[arg(short = 'w', long)]
+        workspace: Option<u32>,
         /// Shell to launch (default: powershell.exe)
         #[arg(long)]
         shell: Option<String>,
@@ -37,6 +42,30 @@ enum Cmd {
         cols: u16,
         #[arg(long, default_value_t = 30)]
         rows: u16,
+    },
+    /// Send input to a session (by id-prefix or name)
+    Write {
+        /// Session id-prefix, exact name, or full UUID
+        target: String,
+        /// Text to send; omit or pass `-` to read the payload from stdin
+        data: Option<String>,
+        /// Append a carriage return (Enter) after the text
+        #[arg(long)]
+        enter: bool,
+    },
+    /// Resize a session's PTY (by id-prefix or name)
+    Resize {
+        /// Session id-prefix, exact name, or full UUID
+        target: String,
+        #[arg(long)]
+        cols: u16,
+        #[arg(long)]
+        rows: u16,
+    },
+    /// Capture a session's scrollback to stdout (by id-prefix or name)
+    Dump {
+        /// Session id-prefix, exact name, or full UUID
+        target: String,
     },
     /// Kill a session by id-prefix or name
     Kill { target: String },
@@ -77,6 +106,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Cmd::New {
             name,
+            workspace,
             shell,
             shell_args,
             cwd,
@@ -85,7 +115,7 @@ async fn run(cli: Cli) -> Result<()> {
         } => {
             let info: SessionInfo = client
                 .request(Method::CreateSession {
-                    name,
+                    name: apply_workspace_prefix(name, workspace),
                     shell,
                     shell_args,
                     cwd,
@@ -97,6 +127,84 @@ async fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
                 println!("created {} ({})", info.name, info.id);
+            }
+        }
+        Cmd::Write {
+            target,
+            data,
+            enter,
+        } => {
+            let id = resolve_target(&client, &target).await?;
+            // `-` or an omitted payload reads the entire stdin, so data can be piped.
+            let payload = match data.as_deref() {
+                None | Some("-") => std::io::read_to_string(std::io::stdin())?,
+                Some(text) => text.to_string(),
+            };
+            let bytes = payload.len() + usize::from(enter);
+            client
+                .request_raw(Method::WriteSession {
+                    id,
+                    data: encode_write_data(&payload, enter),
+                })
+                .await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "action": "write",
+                        "id": id.to_string(),
+                        "bytes": bytes,
+                    }))?
+                );
+            } else {
+                println!("wrote {bytes} bytes to {id}");
+            }
+        }
+        Cmd::Resize { target, cols, rows } => {
+            let id = resolve_target(&client, &target).await?;
+            client
+                .request_raw(Method::ResizeSession { id, cols, rows })
+                .await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "action": "resize",
+                        "id": id.to_string(),
+                        "cols": cols,
+                        "rows": rows,
+                    }))?
+                );
+            } else {
+                println!("resized {id} to {cols}x{rows}");
+            }
+        }
+        Cmd::Dump { target } => {
+            let id = resolve_target(&client, &target).await?;
+            let result: AttachResult = client.request(Method::AttachSession { id }).await?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&result.scrollback)
+                .map_err(|e| anyhow!("invalid base64 scrollback: {e}"))?;
+            // Best-effort detach so the daemon stops streaming to this (now gone)
+            // client; a failure here must not fail the dump.
+            let _ = client.request_raw(Method::DetachSession { id }).await;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "info": serde_json::to_value(&result.info)?,
+                        "scrollback": String::from_utf8_lossy(&bytes),
+                    }))?
+                );
+            } else {
+                use std::io::Write as _;
+                // Raw scrollback bytes with no trailing newline, so flush
+                // explicitly to guarantee they reach stdout/pipe on exit.
+                let mut out = std::io::stdout();
+                out.write_all(&bytes)?;
+                out.flush()?;
             }
         }
         Cmd::Kill { target } => {
@@ -220,9 +328,46 @@ fn format_sessions_table(sessions: &[SessionInfo]) -> String {
     lines.join("\n")
 }
 
+/// Base64-encode the bytes to inject into a session, appending a carriage
+/// return when `enter` is set — mirroring how the GUI submits PTY input.
+fn encode_write_data(text: &str, enter: bool) -> String {
+    let mut payload = text.to_string();
+    if enter {
+        payload.push('\r');
+    }
+    base64::engine::general_purpose::STANDARD.encode(payload.as_bytes())
+}
+
+/// Apply the `w{index}.{name}` workspace naming scheme so a CLI session shows
+/// up in the GUI Navigator. With no workspace the name passes through; a `None`
+/// name stays `None` (the daemon assigns its default, unprefixed name); an
+/// already-prefixed name is left as-is to avoid double-prefixing.
+fn apply_workspace_prefix(name: Option<String>, workspace: Option<u32>) -> Option<String> {
+    match (name, workspace) {
+        (Some(name), Some(index)) if !has_workspace_prefix(&name) => Some(format!("w{index}.{name}")),
+        (name, _) => name,
+    }
+}
+
+/// Whether `name` already begins with a `w{digits}.` workspace prefix.
+fn has_workspace_prefix(name: &str) -> bool {
+    let rest = match name.strip_prefix('w') {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let digits = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    digits > 0 && rest[digits..].starts_with('.')
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_sessions_table, resolve_target_in, Cli, Cmd};
+    use super::{
+        apply_workspace_prefix, encode_write_data, format_sessions_table, resolve_target_in, Cli,
+        Cmd,
+    };
+    use base64::Engine;
     use clap::Parser;
     use uuid::Uuid;
     use winmux_lib::pty::SessionInfo;
@@ -327,6 +472,7 @@ mod tests {
         match cli.cmd {
             Cmd::New {
                 name,
+                workspace,
                 shell,
                 shell_args,
                 cwd,
@@ -336,6 +482,7 @@ mod tests {
                 assert_eq!(name.as_deref(), Some("dev"));
                 assert_eq!(cols, 100);
                 assert_eq!(rows, 30, "rows keeps its default");
+                assert!(workspace.is_none());
                 assert!(shell.is_none());
                 assert!(shell_args.is_empty());
                 assert!(cwd.is_none());
@@ -362,6 +509,126 @@ mod tests {
                 assert_eq!(name, "newname");
             }
             _ => panic!("expected Rename"),
+        }
+    }
+
+    #[test]
+    fn encode_write_data_round_trips_text() {
+        let encoded = encode_write_data("echo hi", false);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .unwrap();
+        assert_eq!(decoded, b"echo hi");
+    }
+
+    #[test]
+    fn encode_write_data_appends_carriage_return_with_enter() {
+        let encoded = encode_write_data("echo hi", true);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .unwrap();
+        assert_eq!(decoded, b"echo hi\r");
+    }
+
+    #[test]
+    fn apply_workspace_prefix_adds_prefix_with_index() {
+        assert_eq!(
+            apply_workspace_prefix(Some("dev".to_string()), Some(1)),
+            Some("w1.dev".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_workspace_prefix_passes_through_without_index() {
+        assert_eq!(
+            apply_workspace_prefix(Some("dev".to_string()), None),
+            Some("dev".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_workspace_prefix_none_name_stays_none() {
+        // No name means the daemon assigns its own default (unprefixed) name.
+        assert_eq!(apply_workspace_prefix(None, Some(2)), None);
+    }
+
+    #[test]
+    fn apply_workspace_prefix_does_not_double_prefix() {
+        assert_eq!(
+            apply_workspace_prefix(Some("w1.dev".to_string()), Some(2)),
+            Some("w1.dev".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_write_with_data_and_enter() {
+        let cli = Cli::try_parse_from(["winmuxctl", "write", "dev", "echo hi", "--enter"]).unwrap();
+        match cli.cmd {
+            Cmd::Write {
+                target,
+                data,
+                enter,
+            } => {
+                assert_eq!(target, "dev");
+                assert_eq!(data.as_deref(), Some("echo hi"));
+                assert!(enter);
+            }
+            _ => panic!("expected Write"),
+        }
+    }
+
+    #[test]
+    fn parses_write_stdin_marker() {
+        let cli = Cli::try_parse_from(["winmuxctl", "write", "dev", "-"]).unwrap();
+        match cli.cmd {
+            Cmd::Write {
+                target,
+                data,
+                enter,
+            } => {
+                assert_eq!(target, "dev");
+                assert_eq!(data.as_deref(), Some("-"));
+                assert!(!enter);
+            }
+            _ => panic!("expected Write"),
+        }
+    }
+
+    #[test]
+    fn parses_resize_with_cols_and_rows() {
+        let cli =
+            Cli::try_parse_from(["winmuxctl", "resize", "dev", "--cols", "100", "--rows", "40"])
+                .unwrap();
+        match cli.cmd {
+            Cmd::Resize { target, cols, rows } => {
+                assert_eq!(target, "dev");
+                assert_eq!(cols, 100);
+                assert_eq!(rows, 40);
+            }
+            _ => panic!("expected Resize"),
+        }
+    }
+
+    #[test]
+    fn parses_dump_target() {
+        let cli = Cli::try_parse_from(["winmuxctl", "dump", "dev"]).unwrap();
+        match cli.cmd {
+            Cmd::Dump { target } => assert_eq!(target, "dev"),
+            _ => panic!("expected Dump"),
+        }
+    }
+
+    #[test]
+    fn parses_new_with_workspace_and_name() {
+        let cli = Cli::try_parse_from(["winmuxctl", "new", "-w", "1", "-s", "dev"]).unwrap();
+        match cli.cmd {
+            Cmd::New {
+                name, workspace, ..
+            } => {
+                assert_eq!(name.as_deref(), Some("dev"));
+                assert_eq!(workspace, Some(1));
+            }
+            _ => panic!("expected New"),
         }
     }
 }
