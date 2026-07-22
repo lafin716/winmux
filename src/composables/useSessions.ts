@@ -1,5 +1,11 @@
-import { reactive, computed } from "vue";
-import { api, type SessionInfo } from "../lib/tauri";
+import { reactive, computed, watch } from "vue";
+import { api, onSessionActivity, type SessionInfo } from "../lib/tauri";
+import {
+  applyActivity,
+  clearActivity,
+  type ActivityState,
+  type SessionActivityFlags,
+} from "../lib/session-activity";
 import type { Workspace } from "../lib/layout-types";
 import { useWorkspaces, workspaceDefaultCwd } from "./useWorkspaces";
 import { useFocus } from "./useFocus";
@@ -28,6 +34,27 @@ const state = reactive<Store>({
   sessions: [],
 });
 const currentCwds = reactive<Record<string, string>>({});
+
+// Transient, in-memory per-Session activity flags (mirrors the `currentCwds`
+// pattern). Fed by the single app-wide `session-activity` listener below and
+// cleared when a Session becomes focused; never persisted. The pure reducer in
+// `session-activity.ts` returns new objects, so `commitActivity` reconciles the
+// reactive map in place to keep readers (Navigator badges, Ticket 2) reactive.
+const activity = reactive<ActivityState>({});
+let activityListenerStarted = false;
+
+function commitActivity(next: ActivityState) {
+  for (const id of Object.keys(activity)) {
+    if (!(id in next)) delete activity[id];
+  }
+  for (const id of Object.keys(next)) {
+    const n = next[id];
+    const cur = activity[id];
+    if (!cur || cur.output !== n.output || cur.bell !== n.bell) {
+      activity[id] = { output: n.output, bell: n.bell };
+    }
+  }
+}
 
 const SESSION_NUM_RE = /^session-(\d+)$/;
 
@@ -105,6 +132,20 @@ export function useSessions() {
     if (!leaf || !leaf.activeTabId) return null;
     return getById(leaf.activeTabId) ?? null;
   });
+
+  // Register the single, app-wide activity pipeline once (not per component):
+  // fold each `session-activity` event with the focused Session treated as
+  // already-seen, and clear a Session's flags when it gains focus.
+  if (!activityListenerStarted) {
+    activityListenerStarted = true;
+    void onSessionActivity((payload) => {
+      const focusedId = focusedSession.value?.id ?? null;
+      commitActivity(applyActivity(activity, payload, focusedId));
+    });
+    watch(focusedSession, (session) => {
+      if (session) commitActivity(clearActivity(activity, session.id));
+    });
+  }
 
   const workspaceSessions = computed<SessionInfo[]>(() => {
     const ws = activeWorkspace.value;
@@ -210,6 +251,7 @@ export function useSessions() {
     const idx = state.sessions.findIndex((s) => s.id === id);
     if (idx >= 0) state.sessions.splice(idx, 1);
     delete currentCwds[id];
+    delete activity[id];
     for (const ws of wsState.workspaces) {
       if (findLeafBySession(ws.layout, id)) {
         const { root } = removeTab(ws.layout, id);
@@ -239,6 +281,10 @@ export function useSessions() {
     kill,
     rename,
     getById,
+    activity,
+    sessionActivity(id: string): SessionActivityFlags | undefined {
+      return activity[id];
+    },
     currentCwd(id: string): string | undefined {
       return currentCwds[id] ?? getById(id)?.cwd ?? undefined;
     },

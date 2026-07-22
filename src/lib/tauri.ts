@@ -54,6 +54,11 @@ export interface PtyExitPayload {
   id: string;
 }
 
+export interface SessionActivityPayload {
+  id: string;
+  bell: boolean;
+}
+
 export const api = {
   createSession(opts: {
     name?: string;
@@ -120,6 +125,12 @@ export function onPtyExit(
   handler: (payload: PtyExitPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<PtyExitPayload>("pty-exit", (e) => handler(e.payload));
+}
+
+export function onSessionActivity(
+  handler: (payload: SessionActivityPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionActivityPayload>("session-activity", (e) => handler(e.payload));
 }
 
 // Helpers for base64 <-> binary

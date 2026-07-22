@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod manager;
 
 use anyhow::{anyhow, Result};
@@ -14,6 +15,7 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::ipc::protocol::Event;
+use crate::pty::activity::detect_activity;
 
 const SCROLLBACK_BYTES: usize = 1_000_000;
 
@@ -103,6 +105,11 @@ pub fn spawn_session(
                     Ok(0) => break,
                     Ok(n) => {
                         let chunk = &buf[..n];
+                        // Detect activity on the raw bytes before base64 encoding.
+                        // This is the only backend spot that sees every Session's
+                        // output regardless of attach, so the signal is emitted on
+                        // an attach-independent event (see server forward filter).
+                        let sig = detect_activity(chunk);
                         {
                             let mut sb = scrollback_clone.lock();
                             sb.extend(chunk.iter().copied());
@@ -112,6 +119,7 @@ pub fn spawn_session(
                         }
                         let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
                         let _ = events_clone.send(Event::PtyOutput { id, data: encoded });
+                        let _ = events_clone.send(Event::SessionActivity { id, bell: sig.bell });
                     }
                     Err(_) => break,
                 }

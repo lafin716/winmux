@@ -69,6 +69,12 @@ pub fn run() {
                                 serde_json::json!({ "id": id, "name": name }),
                             );
                         }
+                        Event::SessionActivity { id, bell } => {
+                            let _ = app_handle.emit(
+                                "session-activity",
+                                serde_json::json!({ "id": id, "bell": bell }),
+                            );
+                        }
                     }
                 }
             });

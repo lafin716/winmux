@@ -67,6 +67,7 @@ pub enum Event {
     SessionAdded { info: SessionInfo },
     SessionRemoved { id: Uuid },
     SessionRenamed { id: Uuid, name: String },
+    SessionActivity { id: Uuid, bell: bool },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -77,7 +78,8 @@ pub struct AttachResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{Method, Request};
+    use super::{Event, Method, Request};
+    use uuid::Uuid;
 
     #[test]
     fn create_session_defaults_missing_shell_args() {
@@ -113,5 +115,15 @@ mod tests {
         };
         let value = serde_json::to_value(request).expect("request should serialize");
         assert_eq!(value["shell_args"], serde_json::json!(["-d", "Ubuntu"]));
+    }
+
+    #[test]
+    fn session_activity_serializes_with_tag_and_string_id() {
+        let id = Uuid::nil();
+        let value = serde_json::to_value(Event::SessionActivity { id, bell: true })
+            .expect("event should serialize");
+        assert_eq!(value["event"], serde_json::json!("session_activity"));
+        assert_eq!(value["id"], serde_json::json!(id.to_string()));
+        assert_eq!(value["bell"], serde_json::json!(true));
     }
 }
