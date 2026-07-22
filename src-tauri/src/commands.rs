@@ -184,6 +184,23 @@ fn read_file_preview_sync(target: &str, cwd: Option<&str>) -> Result<FilePreview
         });
     }
 
+    // PDFs are shipped as base64 like images; the webview renders them with its
+    // native PDF viewer from a same-origin blob (no asset-protocol scope needed).
+    if mime == "application/pdf" {
+        return Ok(FilePreview {
+            canonical_path,
+            name,
+            kind: "pdf",
+            language: language.to_string(),
+            mime: mime.to_string(),
+            text: None,
+            data: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+            size,
+            line,
+            column,
+        });
+    }
+
     match String::from_utf8(bytes) {
         Ok(text) => Ok(FilePreview {
             canonical_path,
@@ -441,6 +458,7 @@ fn file_type(extension: &str) -> (&'static str, &'static str) {
         "toml" => ("toml", "text/plain"),
         "yaml" | "yml" => ("yaml", "text/plain"),
         "md" => ("markdown", "text/markdown"),
+        "pdf" => ("pdf", "application/pdf"),
         "html" | "htm" => ("html", "text/html"),
         "css" | "scss" | "less" => ("css", "text/css"),
         "py" => ("python", "text/plain"),
@@ -702,5 +720,52 @@ mod resource_tests {
         assert_eq!(path, r#"C:\work dir\main.ts"#);
         assert_eq!(line, Some(8));
         assert_eq!(column, Some(2));
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("winmux-preview-test-{}-{}", tag, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn marks_pdf_files_and_ships_their_bytes() {
+        let dir = temp_dir("pdf");
+        let file = dir.join("doc.pdf");
+        let bytes = b"%PDF-1.4 not a real pdf, but enough to exist";
+        fs::write(&file, bytes).unwrap();
+
+        let preview = super::read_file_preview_sync(file.to_str().unwrap(), None).unwrap();
+        assert_eq!(preview.kind, "pdf");
+        assert_eq!(preview.mime, "application/pdf");
+        assert_eq!(preview.language, "pdf");
+        // The webview renders the PDF from a base64 blob, so the bytes ride
+        // along in `data`; there is no text form.
+        assert!(preview.data.is_some());
+        assert!(preview.text.is_none());
+        assert_eq!(preview.size, bytes.len() as u64);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reads_a_utf8_text_file_as_text() {
+        let dir = temp_dir("text");
+        let file = dir.join("readme.md");
+        fs::write(&file, b"# Title\n").unwrap();
+
+        let preview = super::read_file_preview_sync(file.to_str().unwrap(), None).unwrap();
+        assert_eq!(preview.kind, "text");
+        assert_eq!(preview.language, "markdown");
+        assert_eq!(preview.text.as_deref(), Some("# Title\n"));
+
+        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import "monaco-editor/esm/vs/language/json/monaco.contribution";
 import "monaco-editor/esm/vs/basic-languages/bat/bat.contribution";
@@ -15,7 +15,9 @@ import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution"
 import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-import type { FilePreview } from "../lib/tauri";
+import MarkdownIt from "markdown-it";
+import { base64ToBytes, type FilePreview } from "../lib/tauri";
+import { resolveViewerMode } from "../lib/viewer-mode";
 
 const props = defineProps<{ preview: FilePreview }>();
 
@@ -23,9 +25,34 @@ const editorHost = ref<HTMLDivElement | null>(null);
 let editor: monaco.editor.IStandaloneCodeEditor | null = null;
 let model: monaco.editor.ITextModel | null = null;
 
+// `html: false` keeps embedded raw HTML/scripts inert — markdown-it escapes
+// them rather than emitting them, so opening an untrusted file is safe.
+const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
+
+const mode = computed(() => resolveViewerMode(props.preview));
+
 const imageSrc = computed(() =>
   props.preview.data ? `data:${props.preview.mime};base64,${props.preview.data}` : "",
 );
+
+const markdownHtml = computed(() =>
+  mode.value === "markdown" ? md.render(props.preview.text ?? "") : "",
+);
+
+// Feed the PDF to the webview's native viewer via a same-origin blob URL built
+// from the base64 bytes the backend shipped. The object URL is revoked when the
+// preview changes or the component unmounts (via watchEffect's cleanup).
+const pdfSrc = ref("");
+watchEffect((onCleanup) => {
+  if (mode.value !== "pdf" || !props.preview.data) {
+    pdfSrc.value = "";
+    return;
+  }
+  const blob = new Blob([base64ToBytes(props.preview.data)], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  pdfSrc.value = url;
+  onCleanup(() => URL.revokeObjectURL(url));
+});
 
 const workerScope = self as typeof self & {
   MonacoEnvironment?: {
@@ -47,7 +74,7 @@ function monacoLanguage(language: string): string {
 }
 
 async function createEditor() {
-  if (props.preview.kind !== "text") return;
+  if (mode.value !== "text") return;
   await nextTick();
   if (!editorHost.value) return;
   model = monaco.editor.createModel(
@@ -95,17 +122,25 @@ onBeforeUnmount(() => {
   <div class="file-viewer">
     <div class="toolbar">
       <span class="path" :title="preview.canonicalPath">{{ preview.canonicalPath }}</span>
-      <button v-if="preview.kind === 'text'" title="Find (Ctrl+F)" @click="openFind">Find</button>
+      <button v-if="mode === 'text'" title="Find (Ctrl+F)" @click="openFind">Find</button>
       <span class="meta">{{ preview.language }} · {{ preview.size.toLocaleString() }} bytes</span>
     </div>
 
-    <div v-if="preview.kind === 'image'" class="image-wrap">
+    <div v-if="mode === 'image'" class="image-wrap">
       <img :src="imageSrc" :alt="preview.name" />
     </div>
-    <div v-else-if="preview.kind === 'binary'" class="message">
+    <!-- Rendered read-only Markdown; markdown-it emits safe HTML (html: false). -->
+    <div v-else-if="mode === 'markdown'" class="markdown-body" v-html="markdownHtml" />
+    <iframe
+      v-else-if="mode === 'pdf'"
+      class="pdf-frame"
+      :src="pdfSrc"
+      :title="preview.name"
+    />
+    <div v-else-if="mode === 'binary'" class="message">
       Binary files cannot be previewed.
     </div>
-    <div v-else-if="preview.kind === 'too_large'" class="message">
+    <div v-else-if="mode === 'too_large'" class="message">
       This file is too large to preview.
     </div>
     <div v-else ref="editorHost" class="editor-host" />
@@ -161,4 +196,61 @@ button {
   color: #888;
 }
 img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.pdf-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #333;
+}
+
+.markdown-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px;
+  line-height: 1.6;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+}
+/* v-html content is not scoped, so reach it with :deep(). */
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  color: #fff;
+  border-bottom: 1px solid #333;
+  padding-bottom: 4px;
+  margin: 20px 0 12px;
+}
+.markdown-body :deep(a) { color: #4ea1ff; }
+.markdown-body :deep(code) {
+  background: #2a2a2a;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+.markdown-body :deep(pre) {
+  background: #252525;
+  padding: 12px;
+  border-radius: 4px;
+  overflow: auto;
+}
+.markdown-body :deep(pre code) { background: none; padding: 0; }
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid #555;
+  margin: 12px 0;
+  padding: 0 12px;
+  color: #aaa;
+}
+.markdown-body :deep(table) { border-collapse: collapse; }
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid #444;
+  padding: 4px 10px;
+}
+.markdown-body :deep(img) { max-width: 100%; }
+.markdown-body :deep(hr) { border: none; border-top: 1px solid #333; }
 </style>

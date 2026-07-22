@@ -13,7 +13,7 @@ export interface SessionInfo {
 export interface FilePreview {
   canonicalPath: string;
   name: string;
-  kind: "text" | "image" | "binary" | "too_large";
+  kind: "text" | "image" | "binary" | "too_large" | "pdf";
   language: string;
   mime: string;
   text?: string | null;
