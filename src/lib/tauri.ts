@@ -35,6 +35,16 @@ export interface DirListing {
   entries: DirEntry[];
 }
 
+export interface FileEntry {
+  path: string; // absolute
+  relPath: string; // root-relative display path, always `/`-joined
+}
+
+export interface FileIndex {
+  root: string;
+  files: FileEntry[];
+}
+
 export interface PtyOutputPayload {
   id: string;
   data: string; // base64
@@ -79,6 +89,9 @@ export const api = {
   },
   readDirectory(path: string): Promise<DirListing> {
     return invoke("read_directory", { path });
+  },
+  listFiles(root: string): Promise<FileIndex> {
+    return invoke("list_files", { root });
   },
   browserNavigate(label: string, url: string): Promise<void> {
     return invoke("browser_navigate", { label, url });

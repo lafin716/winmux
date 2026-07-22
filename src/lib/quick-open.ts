@@ -180,6 +180,28 @@ export function sessionCandidates(
   return sessions.map((s) => ({ kind: "session", id: s.id, label: displayName(s.name) }));
 }
 
+/** The final path segment of a `/`- or `\`-joined relative path. */
+function fileBasename(relPath: string): string {
+  const idx = Math.max(relPath.lastIndexOf("/"), relPath.lastIndexOf("\\"));
+  return idx >= 0 ? relPath.slice(idx + 1) : relPath;
+}
+
+/**
+ * Build file candidates from the backend file index (`api.listFiles`). The
+ * basename is matched/shown as the label and the root-relative path is the
+ * subtitle; the absolute path is the id the caller opens.
+ */
+export function fileCandidates(
+  files: ReadonlyArray<{ path: string; relPath: string }>,
+): QuickOpenCandidate[] {
+  return files.map((f) => ({
+    kind: "file",
+    id: f.path,
+    label: fileBasename(f.relPath),
+    subtitle: f.relPath,
+  }));
+}
+
 /** Build command candidates from saved Palette items; command text is the subtitle. */
 export function commandCandidates(
   items: ReadonlyArray<{ id: string; label: string; command: string }>,

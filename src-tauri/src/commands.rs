@@ -285,6 +285,115 @@ fn list_directory(dir: &std::path::Path) -> Result<Vec<DirEntryInfo>, String> {
     Ok(entries)
 }
 
+/// Maximum number of files [`list_files`] returns. The walk stops once this many
+/// files are collected so a huge tree can never flood Quick Open or stall the UI.
+const FILE_INDEX_CAP: usize = 5000;
+
+/// Directory names always pruned from the recursive file walk: heavy/irrelevant
+/// trees. Dotfile directories are pruned separately (see [`is_skipped_dir`]).
+const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "dist"];
+
+/// Whether a directory should be pruned from the walk: a fixed heavy/irrelevant
+/// name, or any dotfile directory (a name starting with `.`).
+fn is_skipped_dir(name: &str) -> bool {
+    name.starts_with('.') || SKIP_DIRS.contains(&name)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    /// Absolute path, used to open the file.
+    path: String,
+    /// Path relative to the indexed root, shown in Quick Open. Always `/`-joined.
+    rel_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileIndex {
+    /// Canonical path of the root that was walked.
+    root: String,
+    files: Vec<FileEntry>,
+}
+
+/// Recursively index files under `root` for the Quick Open file source. Where
+/// [`read_directory`] reads one level for the Explorer tree, this walks the whole
+/// tree into a flat list: it prunes heavy/irrelevant directories, never follows
+/// symlinks, and stops at [`FILE_INDEX_CAP`] files. Mirrors `read_directory` by
+/// delegating to the synchronous, unit-testable [`walk_files_sync`] via
+/// `spawn_blocking`.
+#[tauri::command]
+pub async fn list_files(root: String) -> Result<FileIndex, String> {
+    tauri::async_runtime::spawn_blocking(move || walk_files_sync(&root, FILE_INDEX_CAP))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn walk_files_sync(root: &str, cap: usize) -> Result<FileIndex, String> {
+    let trimmed = root.trim();
+    if trimmed.is_empty() {
+        return Err("No directory to index.".to_string());
+    }
+    let canonical = PathBuf::from(trimmed)
+        .canonicalize()
+        .map_err(|e| format!("Directory not found: {trimmed} ({e})"))?;
+    if !canonical.is_dir() {
+        return Err(format!("Not a directory: {}", canonical.display()));
+    }
+    let files = collect_files(&canonical, cap);
+    Ok(FileIndex {
+        root: canonical.to_string_lossy().into_owned(),
+        files,
+    })
+}
+
+/// Depth-first walk collecting files under `root`, honoring the skip-list and the
+/// `cap` and never traversing symlinks (checked via the non-following
+/// `DirEntry::file_type`, so links report as symlinks and are skipped rather than
+/// followed). Unreadable directories are skipped silently instead of failing the
+/// whole index.
+fn collect_files(root: &std::path::Path, cap: usize) -> Vec<FileEntry> {
+    let mut files: Vec<FileEntry> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if files.len() >= cap {
+            break;
+        }
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in read {
+            if files.len() >= cap {
+                break;
+            }
+            let Ok(item) = item else { continue };
+            let Ok(file_type) = item.file_type() else { continue };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                let name = item.file_name().to_string_lossy().into_owned();
+                if is_skipped_dir(&name) {
+                    continue;
+                }
+                stack.push(item.path());
+            } else if file_type.is_file() {
+                let path = item.path();
+                let rel_path = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.push(FileEntry {
+                    path: path.to_string_lossy().into_owned(),
+                    rel_path,
+                });
+            }
+        }
+    }
+    files
+}
+
 fn split_file_location(target: &str) -> (String, Option<u32>, Option<u32>) {
     let mut value = target
         .trim()
@@ -469,6 +578,101 @@ mod directory_tests {
         assert_eq!(names, vec!["sub", "top.txt"]);
 
         fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod file_walk_tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("winmux-files-test-{}-{}", tag, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn rel_paths(index: &super::FileIndex) -> Vec<String> {
+        index.files.iter().map(|f| f.rel_path.clone()).collect()
+    }
+
+    #[test]
+    fn prunes_skip_list_and_dotfile_directories() {
+        let dir = temp_dir("skip");
+        fs::write(dir.join("keep.txt"), b"x").unwrap();
+        fs::create_dir(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub").join("nested.txt"), b"x").unwrap();
+        // A file inside each pruned directory must never surface. `.cache`
+        // exercises the dotfile-dir rule beyond the fixed SKIP_DIRS list.
+        for skipped in ["node_modules", ".git", "target", "dist", ".cache"] {
+            fs::create_dir(dir.join(skipped)).unwrap();
+            fs::write(dir.join(skipped).join("ignored.txt"), b"x").unwrap();
+        }
+
+        let index = super::walk_files_sync(dir.to_str().unwrap(), 5000).unwrap();
+        let mut rels = rel_paths(&index);
+        rels.sort();
+        assert_eq!(rels, vec!["keep.txt", "sub/nested.txt"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn respects_the_total_cap() {
+        let dir = temp_dir("cap");
+        for i in 0..10 {
+            fs::write(dir.join(format!("f{i}.txt")), b"x").unwrap();
+        }
+
+        let index = super::walk_files_sync(dir.to_str().unwrap(), 4).unwrap();
+        assert_eq!(index.files.len(), 4);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn returns_root_relative_forward_slash_paths() {
+        let dir = temp_dir("rel");
+        fs::create_dir_all(dir.join("a").join("b")).unwrap();
+        fs::write(dir.join("a").join("b").join("deep.txt"), b"x").unwrap();
+
+        let index = super::walk_files_sync(dir.to_str().unwrap(), 5000).unwrap();
+        assert_eq!(rel_paths(&index), vec!["a/b/deep.txt"]);
+        // The absolute path still points at the real file on disk.
+        assert!(Path::new(&index.files[0].path).is_file());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn does_not_follow_symlinked_directories() {
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink as make_symlink_dir;
+        #[cfg(windows)]
+        use std::os::windows::fs::symlink_dir as make_symlink_dir;
+
+        let base = temp_dir("symlink");
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("inside.txt"), b"x").unwrap();
+        fs::write(outside.join("outside.txt"), b"x").unwrap();
+
+        // Creating symlinks can require privileges (notably Windows without
+        // Developer Mode); when unavailable, skip rather than fail spuriously.
+        if make_symlink_dir(&outside, root.join("link")).is_err() {
+            fs::remove_dir_all(&base).ok();
+            return;
+        }
+
+        let index = super::walk_files_sync(root.to_str().unwrap(), 5000).unwrap();
+        let rels = rel_paths(&index);
+        assert!(rels.contains(&"inside.txt".to_string()));
+        assert!(rels.iter().all(|r| !r.contains("outside.txt")));
+
+        fs::remove_dir_all(&base).ok();
     }
 }
 

@@ -6,16 +6,19 @@ import { useWorkspaces } from "../composables/useWorkspaces";
 import { useSessions } from "../composables/useSessions";
 import { useFocus } from "../composables/useFocus";
 import { usePalette } from "../composables/usePalette";
+import { useResources } from "../composables/useResources";
 import { activateSessionTab } from "../composables/useLayout";
 import {
   rankQuickOpen,
   workspaceCandidates,
   sessionCandidates,
   commandCandidates,
+  fileCandidates,
   type QuickOpenCandidate,
   type QuickOpenResult,
   type QuickOpenKind,
 } from "../lib/quick-open";
+import { resolveExplorerRoot } from "../lib/explorer-root";
 import {
   workspaceIcon,
   terminalIcon,
@@ -26,9 +29,10 @@ import { api, stringToBase64 } from "../lib/tauri";
 
 const { state, close, setQuery, moveSelection, setSelectedIndex } = useQuickOpen();
 const { state: wsState, activeWorkspace, setActiveWorkspace } = useWorkspaces();
-const { workspaceSessions, focusedSession } = useSessions();
+const { workspaceSessions, focusedSession, currentCwd } = useSessions();
 const { setFocusedLeaf } = useFocus();
 const { items } = usePalette();
+const resources = useResources();
 
 const inputEl = ref<HTMLInputElement | null>(null);
 const listEl = ref<HTMLElement | null>(null);
@@ -40,11 +44,36 @@ const KIND_ICONS: Record<QuickOpenKind, IconifyIcon> = {
   file: fileIcon,
 };
 
+// The file index for the active Workspace's resolved Explorer root. Files are
+// bounded (backend cap) and stay hidden until the user types, so a one-shot
+// fetch when the overlay opens is enough; the ranking seam owns the empty-query
+// rule and the per-kind cap.
+const files = ref<QuickOpenCandidate[]>([]);
+
+async function loadFileIndex(): Promise<void> {
+  files.value = [];
+  const ws = activeWorkspace.value;
+  const focused = focusedSession.value;
+  const root = resolveExplorerRoot({
+    pinnedRoot: ws?.settings?.explorerRoot,
+    defaultCwd: ws?.settings?.defaultCwd,
+    focusedCwd: focused ? currentCwd(focused.id) : undefined,
+  });
+  if (!root) return;
+  try {
+    const index = await api.listFiles(root);
+    files.value = fileCandidates(index.files);
+  } catch (e) {
+    console.warn("listFiles failed", e);
+  }
+}
+
 // Candidate arrays are built from the live sources; ranking, the empty-query
 // rule and the per-kind cap all live in the pure `quick-open` seam.
 const candidates = computed<QuickOpenCandidate[]>(() => [
   ...workspaceCandidates(wsState.workspaces),
   ...sessionCandidates(workspaceSessions.value),
+  ...files.value,
   ...commandCandidates(items),
 ]);
 
@@ -92,7 +121,12 @@ async function act(result: QuickOpenResult | undefined) {
         break;
       }
       case "file":
-        // File source arrives in a later ticket; nothing to open yet.
+        // `result.id` is the file's absolute path from the backend index.
+        try {
+          await resources.openFile(result.id);
+        } catch (e) {
+          console.warn("Failed to open file", e);
+        }
         break;
     }
   }
@@ -117,11 +151,17 @@ function onKeydown(ev: KeyboardEvent) {
   }
 }
 
-// Auto-focus the text field each time the overlay opens.
+// On open: fetch the file index for the active Workspace and auto-focus the
+// text field. On close: drop the index so it is re-fetched fresh next time
+// (Quick Open state is ephemeral).
 watch(
   () => state.open,
   async (isOpen) => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      files.value = [];
+      return;
+    }
+    void loadFileIndex();
     await nextTick();
     inputEl.value?.focus();
   },
@@ -136,7 +176,7 @@ watch(
         class="qo-input"
         type="text"
         :value="state.query"
-        placeholder="Search workspaces, sessions, commands…"
+        placeholder="Search workspaces, sessions, files, commands…"
         spellcheck="false"
         autocomplete="off"
         @input="onInput"

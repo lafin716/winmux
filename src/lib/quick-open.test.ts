@@ -4,6 +4,7 @@ import {
   workspaceCandidates,
   sessionCandidates,
   commandCandidates,
+  fileCandidates,
   DEFAULT_CAP_PER_KIND,
   type QuickOpenCandidate,
 } from "./quick-open";
@@ -199,5 +200,47 @@ describe("candidate builders", () => {
     expect(commandCandidates(saved)).toEqual([
       { kind: "command", id: "c1", label: "ls -la", subtitle: "ls -la" },
     ]);
+  });
+
+  it("fileCandidates uses the basename as the label and the relPath as subtitle/id", () => {
+    expect(
+      fileCandidates([{ path: "C:/proj/src/main.rs", relPath: "src/main.rs" }]),
+    ).toEqual([
+      { kind: "file", id: "C:/proj/src/main.rs", label: "main.rs", subtitle: "src/main.rs" },
+    ]);
+  });
+
+  it("fileCandidates labels a top-level file with its whole relPath", () => {
+    expect(
+      fileCandidates([{ path: "/repo/README.md", relPath: "README.md" }]),
+    ).toEqual([
+      { kind: "file", id: "/repo/README.md", label: "README.md", subtitle: "README.md" },
+    ]);
+  });
+
+  it("fileCandidates derives the basename even from a backslash relPath", () => {
+    expect(
+      fileCandidates([{ path: "C:/proj/a/b.txt", relPath: "a\\b.txt" }])[0].label,
+    ).toBe("b.txt");
+  });
+});
+
+describe("rankQuickOpen — file candidates", () => {
+  it("ranks a file by its basename label and keeps the root-relative subtitle", () => {
+    const cands = fileCandidates([
+      { path: "/p/src/main.rs", relPath: "src/main.rs" },
+      { path: "/p/src/lib.rs", relPath: "src/lib.rs" },
+    ]);
+    const out = rankQuickOpen(cands, "main");
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("file");
+    expect(out[0].id).toBe("/p/src/main.rs");
+    expect(out[0].subtitle).toBe("src/main.rs");
+  });
+
+  it("hides files on an empty query but shows them once the user types", () => {
+    const cands = fileCandidates([{ path: "/p/main.rs", relPath: "main.rs" }]);
+    expect(rankQuickOpen(cands, "")).toEqual([]);
+    expect(rankQuickOpen(cands, "main").map((r) => r.id)).toEqual(["/p/main.rs"]);
   });
 });
