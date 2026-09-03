@@ -20,6 +20,7 @@ const prefs = reactive<Prefs>({
   defaultTerminal: defaultTerminalConfig(),
   paletteUiMode: "context",
   panels: createDefaultPanelsState(),
+  defaultProfileId: { claude: null, codex: null },
 });
 
 export function loadPrefsFromStorage(): void {

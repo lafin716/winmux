@@ -3,33 +3,21 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { Icon } from "@iconify/vue";
 import { useSessions, displayName } from "../composables/useSessions";
 import { useWorkspaces } from "../composables/useWorkspaces";
-import { bellIcon } from "../lib/offline-icons";
+import { useUsage } from "../composables/useUsage";
+import { CLI_AGENTS } from "../composables/useAccountProfiles";
+import { sessionAgentIcon } from "../lib/session-agent-icon";
+import { formatUsagePercent, formatUsageReset } from "../lib/usage-status";
 
-const { workspaceSessions, focusedSession, sessionActivity } = useSessions();
+const { focusedSession } = useSessions();
 const { activeWorkspace } = useWorkspaces();
+const { usage } = useUsage();
 
-// Same badge as the Navigator, scoped to the active Workspace's Session strip:
-// bell takes precedence over plain output; the focused Session shows none.
-function badgeFor(id: string): "bell" | "dot" | null {
-  if (focusedSession.value?.id === id) return null;
-  const flags = sessionActivity(id);
-  if (!flags) return null;
-  if (flags.bell) return "bell";
-  if (flags.output) return "dot";
-  return null;
-}
 const time = ref(formatNow());
 let timer: number | null = null;
 
 function formatNow() {
   const d = new Date();
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function sessionLabel(i: number): string {
-  if (i < 9) return String(i + 1);
-  if (i < 15) return String.fromCharCode(65 + (i - 9));
-  return String(i + 1);
 }
 
 onMounted(() => {
@@ -50,12 +38,19 @@ onUnmounted(() => {
       <span v-if="activeWorkspace" class="ws">{{ activeWorkspace.name }}</span>
       <span v-if="focusedSession">/ {{ displayName(focusedSession.name) }}</span>
     </div>
-    <div class="center">
-      <span v-for="(s, i) in workspaceSessions" :key="s.id"
-            :class="['win', { active: focusedSession?.id === s.id }]">
-        {{ sessionLabel(i) }}:{{ displayName(s.name) }}
-        <Icon v-if="badgeFor(s.id) === 'bell'" class="badge-ico bell" :icon="bellIcon" />
-        <span v-else-if="badgeFor(s.id) === 'dot'" class="badge-ico dot" />
+    <div class="usage">
+      <span
+        v-for="agentDef in CLI_AGENTS"
+        :key="agentDef.id"
+        class="usage-item"
+        :title="`${agentDef.label} 사용량 · 아직 연동되지 않음`"
+      >
+        <Icon
+          :class="['usage-ico', `agent-${agentDef.id}`]"
+          :icon="sessionAgentIcon(agentDef.id)"
+        />
+        <span class="usage-pct">{{ formatUsagePercent(usage[agentDef.id]) }}</span>
+        <span class="usage-reset">{{ formatUsageReset(usage[agentDef.id]) }}</span>
       </span>
     </div>
     <div class="right">
@@ -82,40 +77,37 @@ onUnmounted(() => {
   gap: 6px;
   align-items: center;
 }
-.center {
+.usage {
   flex: 1;
   display: flex;
-  gap: 10px;
+  gap: 16px;
   padding: 0 12px;
   overflow: hidden;
+  align-items: center;
 }
 .badge {
   font-weight: bold;
 }
 .ws { font-weight: 600; }
-.win {
-  opacity: 0.7;
+.usage-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  opacity: 0.9;
+  white-space: nowrap;
 }
-.win.active {
-  background: #1a1a1a;
-  color: #4ec9b0;
-  padding: 0 6px;
-  opacity: 1;
-}
-.badge-ico {
+.usage-ico {
   flex-shrink: 0;
+  font-size: 13px;
 }
-.badge-ico.bell {
-  font-size: 12px;
-  color: #8a5a00;
+.usage-ico.agent-codex {
+  font-size: 15px;
 }
-.badge-ico.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #1a1a1a;
+.usage-pct {
+  font-weight: 700;
+}
+.usage-reset {
+  font-size: 11px;
+  opacity: 0.75;
 }
 </style>

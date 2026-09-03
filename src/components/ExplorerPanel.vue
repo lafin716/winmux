@@ -15,6 +15,8 @@ import { useSessions } from "../composables/useSessions";
 import { useResources } from "../composables/useResources";
 import { resolveExplorerRoot, syncExplorerRoot } from "../lib/explorer-root";
 import { FILE_DRAG_MIME } from "../lib/path-insert";
+import { resolveRightPanelTab } from "../lib/right-panel-tabs";
+import { explorerPanelTitle } from "../lib/explorer-panel-title";
 
 // The Explorer renders a file tree behind the Files icon strip. The tree is
 // rooted at the active Workspace's pinned root (see `explorer-root`), loads one
@@ -40,6 +42,7 @@ interface TreeNode {
 }
 
 const rootNode = ref<TreeNode | null>(null);
+const activeTab = ref(resolveRightPanelTab());
 
 const focusedCwd = computed<string | undefined>(() => {
   const s = focusedSession.value;
@@ -188,15 +191,29 @@ function iconFor(node: TreeNode): IconifyIcon {
 }
 
 const rootName = computed(() => (rootNode.value ? rootNode.value.name : ""));
-const rootPath = computed(() => rootNode.value?.path ?? "");
+const title = computed(() => explorerPanelTitle(rootName.value));
 const canSync = computed(() => !!focusedCwd.value);
 </script>
 
 <template>
   <section class="explorer">
     <div class="body">
+      <nav class="strip" aria-label="Right panel tools">
+        <button
+          class="tool"
+          :class="{ active: activeTab === 'files' }"
+          :aria-current="activeTab === 'files' ? 'page' : undefined"
+          title="Files"
+          type="button"
+          @click="activeTab = 'files'"
+        >
+          <Icon class="ico" :icon="filesIcon" />
+          <span>Files</span>
+        </button>
+      </nav>
+
       <div class="head">
-        <span class="title">Explorer</span>
+        <span class="title">{{ title }}</span>
         <button
           class="sync"
           type="button"
@@ -206,11 +223,6 @@ const canSync = computed(() => !!focusedCwd.value);
         >
           <Icon class="ico" :icon="syncIcon" />
         </button>
-      </div>
-
-      <div v-if="rootNode" class="root" :title="rootPath">
-        <Icon class="ico folder" :icon="folderOpenIcon" />
-        <span class="root-name">{{ rootName }}</span>
       </div>
 
       <div class="tree">
@@ -248,18 +260,11 @@ const canSync = computed(() => !!focusedCwd.value);
         </div>
       </div>
     </div>
-
-    <nav class="strip" aria-label="Explorer tools">
-      <button class="tool active" title="Files" type="button">
-        <Icon class="ico" :icon="filesIcon" />
-      </button>
-    </nav>
   </section>
 </template>
 
 <style scoped>
 .explorer {
-  display: flex;
   height: 100%;
   width: 100%;
   background: #1b1b1b;
@@ -267,17 +272,44 @@ const canSync = computed(() => !!focusedCwd.value);
   overflow: hidden;
 }
 .body {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 8px 4px 8px 8px;
+  min-width: 0;
+  padding: 0 4px 8px 8px;
 }
+.strip {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  border-bottom: 1px solid #111;
+  margin-left: -8px;
+  padding: 0 6px;
+  background: #181818;
+}
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.tool:hover { color: #d4d4d4; background: #242424; }
+.tool.active { color: #d9b96a; border-bottom-color: #d9b96a; }
+.tool:focus-visible { outline: 1px solid #4ec9b0; outline-offset: -2px; }
+.tool .ico { font-size: 17px; }
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-right: 4px;
+  margin-top: 8px;
   margin-bottom: 8px;
 }
 .title {
@@ -301,22 +333,6 @@ const canSync = computed(() => !!focusedCwd.value);
 .sync:hover:not(:disabled) { color: #4ec9b0; background: #262626; }
 .sync:disabled { opacity: 0.35; cursor: default; }
 .sync .ico { font-size: 16px; }
-.root {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px 6px;
-  color: #cfcfcf;
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-}
-.root .folder { color: #d9b96a; font-size: 16px; flex-shrink: 0; }
-.root-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .tree {
   flex: 1;
   min-height: 0;
@@ -375,30 +391,4 @@ const canSync = computed(() => !!focusedCwd.value);
   text-decoration: underline;
 }
 .inline-sync:disabled { color: #666; cursor: default; text-decoration: none; }
-.strip {
-  width: 40px;
-  flex-shrink: 0;
-  background: #161616;
-  border-left: 1px solid #111;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 6px 0;
-  gap: 4px;
-}
-.tool {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #888;
-  cursor: pointer;
-}
-.tool:hover { color: #d4d4d4; background: #262626; }
-.tool.active { color: #4ec9b0; background: #232323; }
-.tool .ico { font-size: 18px; }
 </style>

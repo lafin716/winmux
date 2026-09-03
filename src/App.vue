@@ -19,8 +19,14 @@ import { useKeybindings, loadKeybindingsFromStorage } from "./composables/useKey
 import { useGlobalShortcuts, registerAction, registerFocusSessionByIndex } from "./composables/useGlobalShortcuts";
 import { useSettings } from "./composables/useSettings";
 import { useConfirm } from "./composables/useConfirm";
-import { loadPrefsFromStorage } from "./composables/usePrefs";
+import { loadPrefsFromStorage, usePrefs } from "./composables/usePrefs";
 import { loadPaletteFromStorage } from "./composables/usePalette";
+import {
+  loadAccountProfilesFromStorage,
+  resolveProfileEnv,
+  useAccountProfiles,
+} from "./composables/useAccountProfiles";
+import { resolveDefaultProfile } from "./lib/default-profile";
 import { useResources } from "./composables/useResources";
 import { useQuickOpen } from "./composables/useQuickOpen";
 import { useShellPanels } from "./composables/useShellPanels";
@@ -68,6 +74,8 @@ const { confirm } = useConfirm();
 const resources = useResources();
 const { open: openQuickOpen } = useQuickOpen();
 const { panels, toggleLeft, toggleRight, resize, commit } = useShellPanels();
+const { prefs } = usePrefs();
+const { profiles } = useAccountProfiles();
 useGlobalShortcuts();
 
 let unlistenSessionAgent: UnlistenFn | null = null;
@@ -143,6 +151,7 @@ async function bootstrap() {
   loadPrefsFromStorage();
   loadKeybindingsFromStorage();
   loadPaletteFromStorage();
+  loadAccountProfilesFromStorage();
   loadFromStorage();
   await refresh();
 
@@ -364,8 +373,20 @@ async function quadrantSplit(corner: "tl" | "tr" | "bl" | "br") {
   if (focusLeaf) setFocusedLeaf(focusLeaf.id);
 }
 
+/**
+ * Launches a new Claude session using `prefs.defaultProfileId.claude` (set in
+ * Settings → Accounts) if one is chosen, or the system account (no env
+ * override) otherwise. Backs the "Launch Claude" quick action.
+ */
+async function launchDefaultClaude() {
+  const profile = resolveDefaultProfile("claude", profiles, prefs.defaultProfileId);
+  const env = profile ? await resolveProfileEnv(profile) : undefined;
+  await create({ env, launchCommand: "claude" });
+}
+
 const ACTION_HANDLERS: Record<ActionId, () => void | Promise<void>> = {
   "session.new": async () => { await create(); },
+  "session.newClaude": () => launchDefaultClaude(),
   "session.kill": () => killFocused(),
   "session.killNoConfirm": () => killFocusedNow(),
   "session.rename": () => promptRename(),

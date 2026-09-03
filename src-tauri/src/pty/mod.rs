@@ -8,7 +8,7 @@ use base64::Engine;
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -75,6 +75,7 @@ pub fn spawn_session(
     shell: String,
     shell_args: Vec<String>,
     cwd: Option<String>,
+    env: Option<HashMap<String, String>>,
     cols: u16,
     rows: u16,
 ) -> Result<Session> {
@@ -98,6 +99,11 @@ pub fn spawn_session(
 
     let mut cmd = CommandBuilder::new(&shell);
     cmd.args(shell_args);
+    if let Some(env) = env.as_ref() {
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+    }
     if let Some(cwd) = effective_cwd.as_deref() {
         if !cwd.is_dir() {
             return Err(anyhow!(

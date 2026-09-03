@@ -119,6 +119,7 @@ async fn run(cli: Cli) -> Result<()> {
                     shell,
                     shell_args,
                     cwd,
+                    env: None,
                     cols,
                     rows,
                 })

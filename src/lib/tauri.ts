@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { CliAgentKind } from "./persistence";
 
 export type AgentKind = "terminal" | "claude" | "codex";
 export type AgentTaskStatus = "working" | "completed" | "error";
@@ -79,6 +80,7 @@ export const api = {
     shell?: string;
     shellArgs?: string[];
     cwd?: string;
+    env?: Record<string, string>;
     cols?: number;
     rows?: number;
   } = {}): Promise<SessionInfo> {
@@ -102,6 +104,22 @@ export const api = {
   },
   renameSession(id: string, name: string): Promise<void> {
     return invoke("rename_session", { id, name });
+  },
+  /**
+   * Resolves (creating on first use) the isolated login/config directory for
+   * one account profile, e.g. `%LOCALAPPDATA%\winmux\accounts\claude\<id>`.
+   * Backs the Accounts settings tab; see `useAccountProfiles.ts`.
+   */
+  resolveAccountDir(agent: CliAgentKind, profileId: string): Promise<string> {
+    return invoke("resolve_account_dir", { agent, profileId });
+  },
+  /** Persists a `claude setup-token` value for a `"setup-token"`-linked profile. */
+  setAccountToken(agent: CliAgentKind, profileId: string, token: string): Promise<void> {
+    return invoke("set_account_token", { agent, profileId, token });
+  },
+  /** Reads back a token saved by `setAccountToken`, or `null` if none is linked. */
+  getAccountToken(agent: CliAgentKind, profileId: string): Promise<string | null> {
+    return invoke("get_account_token", { agent, profileId });
   },
   readFilePreview(target: string, cwd?: string): Promise<FilePreview> {
     return invoke("read_file_preview", { target, cwd });

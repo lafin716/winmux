@@ -132,6 +132,7 @@ mod tests {
             "cmd.exe".to_string(),
             vec!["/C".to_string(), "exit".to_string()],
             None,
+            None,
             80,
             24,
         )

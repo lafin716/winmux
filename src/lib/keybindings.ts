@@ -17,6 +17,7 @@ export interface ActionDef {
 
 export const ACTIONS: ReadonlyArray<ActionDef> = [
   { id: "session.new",          label: "New Terminal",         category: "session", default: { ctrl: true, key: "n" }, defaultPrefix: "c" },
+  { id: "session.newClaude",    label: "Launch Claude",        category: "session", default: null,                     defaultPrefix: "C" },
   { id: "session.kill",         label: "Kill Focused Session", category: "session", default: null,                     defaultPrefix: "&" },
   { id: "session.killNoConfirm",label: "Close Focused Session",category: "session", default: { ctrl: true, key: "w" }, defaultPrefix: null },
   { id: "session.rename",       label: "Rename Session",       category: "session", default: null,                     defaultPrefix: "," },

@@ -190,6 +190,7 @@ async fn dispatch(
             shell,
             shell_args,
             cwd,
+            env,
             cols,
             rows,
         } => {
@@ -201,6 +202,7 @@ async fn dispatch(
                 shell,
                 shell_args,
                 cwd,
+                env,
                 cols,
                 rows,
             )?;

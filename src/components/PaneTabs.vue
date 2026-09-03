@@ -23,6 +23,7 @@ import { useDragState } from "../composables/useDragState";
 import { useConfirm } from "../composables/useConfirm";
 import { usePrefs } from "../composables/usePrefs";
 import { sessionAgentIcon } from "../lib/session-agent-icon";
+import { sessionIndicatorClass } from "../lib/session-indicator";
 import {
   TERMINAL_PRESETS,
   cloneTerminalConfig,
@@ -505,8 +506,8 @@ onUnmounted(() => {
           </template>
           <template v-else>
             <span
-              v-if="tabKind(id) === 'terminal' && getSessionById(id)?.agent !== 'terminal' && sessionAgentStatus(id)"
-              :class="['agent-status', `is-${sessionAgentStatus(id)}`]"
+              v-if="tabKind(id) === 'terminal'"
+              :class="['agent-status', sessionIndicatorClass(sessionAgentStatus(id))]"
             />
             <Icon
               v-if="tabKind(id) === 'terminal'"
@@ -728,12 +729,13 @@ onUnmounted(() => {
   height: 6px;
   flex-shrink: 0;
   border-radius: 50%;
+  background: #22c55e;
 }
 .agent-status.is-working {
   background: #e2b341;
   animation: agent-working 900ms ease-in-out infinite alternate;
 }
-.agent-status.is-completed { background: #4ec9b0; }
+.agent-status.is-completed { background: #22c55e; }
 .agent-status.is-error { background: #e06c75; }
 @keyframes agent-working {
   from { opacity: 0.35; transform: scale(0.8); }

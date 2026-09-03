@@ -24,6 +24,7 @@ import { useFocus } from "./useFocus";
 import { usePrefs } from "./usePrefs";
 import { cloneTerminalConfig } from "../lib/terminal-config";
 import type { TerminalConfig } from "../lib/terminal-config";
+import { withAgentLaunch, withCwdIntegration } from "../lib/terminal-launch";
 import { displayName, withWorkspacePrefix } from "../lib/session-names";
 import {
   addTabToLeaf,
@@ -90,44 +91,6 @@ function commitActivity(next: ActivityState) {
 }
 
 const SESSION_NUM_RE = /^session-(\d+)$/;
-
-function withCwdIntegration(terminal: TerminalConfig, args: string[]): string[] {
-  const lowerArgs = args.map((arg) => arg.toLowerCase());
-  switch (terminal.preset) {
-    case "windows-powershell":
-    case "powershell":
-      if (lowerArgs.some((arg) => arg === "-command" || arg === "-file")) return args;
-      return [
-        ...args,
-        "-NoExit",
-        "-Command",
-        "$global:__winmuxPrompt=(Get-Command prompt).ScriptBlock; "
-          + "function global:prompt { $p=(Get-Location).Path; "
-          + "[Console]::Write(([char]27 + ']9;9;' + $p + [char]7)); "
-          + "& $global:__winmuxPrompt }",
-      ];
-    case "cmd":
-      if (lowerArgs.some((arg) => arg === "/c" || arg === "/k")) return args;
-      return [...args, "/K", "prompt $E]9;9;$P$E\\$P$G"];
-    case "git-bash":
-      if (args.length > 0 && args.join("\0") !== "--login\0-i") return args;
-      return [
-        "-c",
-        "export PROMPT_COMMAND='printf \"\\033]7;file:///%s\\033\\\\\" \"$(pwd -W)\"'; exec bash --login -i",
-      ];
-    case "wsl":
-      if (lowerArgs.some((arg) => arg === "-e" || arg === "--exec")) return args;
-      return [
-        ...args,
-        "sh",
-        "-lc",
-        "export PROMPT_COMMAND='printf \"\\033]7;file://wsl.localhost/%s%s\\033\\\\\" \"$WSL_DISTRO_NAME\" \"$PWD\"'; exec \"${SHELL:-bash}\" -l",
-      ];
-    case "custom":
-    default:
-      return args;
-  }
-}
 
 export function nextDaemonName(ws: Workspace, sessions: SessionInfo[]): string {
   const usedIds = new Set(collectAllSessionIds(ws.layout));
@@ -216,6 +179,8 @@ export function useSessions() {
       cwd?: string;
       terminal?: TerminalConfig;
       showError?: boolean;
+      env?: Record<string, string>;
+      launchCommand?: string;
     } = {},
   ): Promise<SessionInfo | null> {
     const requestedName = opts.name ?? (ws ? nextDaemonName(ws, state.sessions) : undefined);
@@ -230,9 +195,11 @@ export function useSessions() {
     const requestedArgs = opts.shell
       ? (opts.shellArgs ?? [])
       : (opts.shellArgs ?? terminal.args);
-    const shellArgs = opts.shell
-      ? [...requestedArgs]
-      : withCwdIntegration(terminal, [...requestedArgs]);
+    const argsForHook = [...requestedArgs];
+    const hookedArgs = opts.shell ? argsForHook : withCwdIntegration(terminal, argsForHook);
+    const shellArgs = !opts.shell && opts.launchCommand
+      ? withAgentLaunch(terminal, hookedArgs, argsForHook, opts.launchCommand)
+      : hookedArgs;
     if (!shell) {
       alert("Select a terminal program in Settings before creating a session.");
       return null;
@@ -244,6 +211,7 @@ export function useSessions() {
         shell,
         shellArgs: [...shellArgs],
         cwd,
+        env: opts.env,
       })], snapshotRevision);
       state.sessions.push(info);
       if (info.cwd) currentCwds[info.id] = info.cwd;
@@ -273,6 +241,8 @@ export function useSessions() {
     cwd?: string;
     terminal?: TerminalConfig;
     showError?: boolean;
+    env?: Record<string, string>;
+    launchCommand?: string;
   } = {}) {
     const ws = activeWorkspace.value;
     const info = await createForWorkspace(ws, opts);

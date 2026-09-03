@@ -18,6 +18,7 @@ import {
   plusIcon,
 } from "../lib/offline-icons";
 import { sessionAgentIcon } from "../lib/session-agent-icon";
+import { sessionIndicatorClass } from "../lib/session-indicator";
 
 const {
   state,
@@ -195,9 +196,8 @@ const canDelete = computed(() => state.workspaces.length > 1);
             @click.stop="focusSession(ws.id, s.id)"
           >
             <span
-              v-if="s.agent !== 'terminal' && s.agentStatus"
-              :class="['agent-status', `is-${s.agentStatus}`]"
-              :title="s.agentStatus"
+              :class="['agent-status', sessionIndicatorClass(s.agentStatus)]"
+              :title="s.agentStatus ?? 'ready'"
             />
             <Icon
               :class="['s-ico', `agent-${s.agent}`]"
@@ -404,12 +404,13 @@ input {
   height: 7px;
   flex-shrink: 0;
   border-radius: 50%;
+  background: #22c55e;
 }
 .agent-status.is-working {
   background: #e2b341;
   animation: agent-working 900ms ease-in-out infinite alternate;
 }
-.agent-status.is-completed { background: #4ec9b0; }
+.agent-status.is-completed { background: #22c55e; }
 .agent-status.is-error { background: #e06c75; }
 @keyframes agent-working {
   from { opacity: 0.35; transform: scale(0.8); }
