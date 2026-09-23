@@ -91,6 +91,40 @@ export function availableTerminalPresets(
   );
 }
 
+/**
+ * The preset a running session's shell belongs to, recovered from the program
+ * it was spawned with.
+ *
+ * A `SessionInfo` carries the executable, not the preset it came from, so a
+ * consumer that needs to know how this shell parses text — path quoting, above
+ * all — matches the program back to a preset here. Anything unrecognised is
+ * `custom`, which the quoting layer then guesses from the program name.
+ */
+export function presetForProgram(program: string): TerminalPreset {
+  const name = program.toLowerCase().replace(/\\/g, "/").split("/").pop() ?? "";
+  const stem = name.replace(/\.exe$/, "");
+  switch (stem) {
+    case "powershell":
+      return "windows-powershell";
+    case "pwsh":
+      return "powershell";
+    case "cmd":
+      return "cmd";
+    case "wsl":
+    case "wslhost":
+      return "wsl";
+    case "zsh":
+      return "zsh";
+    case "bash":
+    case "sh":
+      // Git Bash is the only bash a Windows install offers by default, and on
+      // macOS the POSIX quoting it selects is the same either way.
+      return "git-bash";
+    default:
+      return "custom";
+  }
+}
+
 export function defaultTerminalConfig(): TerminalConfig {
   return configForPreset(isMacHost() ? "zsh" : "windows-powershell");
 }

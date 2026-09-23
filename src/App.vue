@@ -37,6 +37,7 @@ import { resolveDefaultProfile } from "./lib/default-profile";
 import { useResources } from "./composables/useResources";
 import { useQuickOpen } from "./composables/useQuickOpen";
 import { useShellPanels } from "./composables/useShellPanels";
+import { useLaunchRequests } from "./composables/useLaunchRequests";
 import { onSessionAgentChanged } from "./lib/tauri";
 import { ACTIONS, type ActionId } from "./lib/keybindings";
 import {
@@ -82,6 +83,8 @@ const { confirm } = useConfirm();
 const resources = useResources();
 const { open: openQuickOpen } = useQuickOpen();
 const { panels, toggleLeft, toggleRight, resize, commit } = useShellPanels();
+// External launches (Explorer menus, CLI, rhyme://) open tabs like any other.
+const launchRequests = useLaunchRequests();
 const { prefs } = usePrefs();
 const { profiles } = useAccountProfiles();
 const { flowOpen, flowProjectId, closeFlow } = useFlowPage();
@@ -207,6 +210,11 @@ async function bootstrap() {
       setFocusedLeaf(leaf.id);
     }
   }
+
+  // External launches (Explorer menus, CLI, rhyme://) open their own tab, so
+  // they are settled before the fallback below — a right-click that started
+  // the app should not also leave an empty default session beside its tab.
+  await launchRequests.start();
 
   // Ensure at least one session exists.
   if (sessState.sessions.length === 0 && !useLoopRouting().state.groups.some(group => group.status !== 'stopped')) {

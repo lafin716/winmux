@@ -25,7 +25,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { openPalette } from "../composables/usePalette";
 import { useResources } from "../composables/useResources";
 import { useSessions } from "../composables/useSessions";
-import { FILE_DRAG_MIME, formatPathForInsertion } from "../lib/path-insert";
+import { FILE_DRAG_MIME, formatPathsForShell, parseDragPayload } from "../lib/path-insert";
+import { presetForProgram } from "../lib/terminal-config";
 import { TERMINAL_BASE_FONT_SIZE, useTerminalZoom } from "../composables/useTerminalZoom";
 import { useKeybindings } from "../composables/useKeybindings";
 import TerminalLinkMenu from "./TerminalLinkMenu.vue";
@@ -396,12 +397,19 @@ function onHostDragOver(ev: DragEvent) {
 }
 
 function onHostDrop(ev: DragEvent) {
-  const path = ev.dataTransfer?.getData(FILE_DRAG_MIME);
-  if (!path) return; // directory / non-file / unrelated drag — ignore
+  const payload = ev.dataTransfer?.getData(FILE_DRAG_MIME);
+  if (!payload) return; // unrelated drag — ignore
+  const paths = parseDragPayload(payload);
+  if (!paths.length) return;
   ev.preventDefault();
-  // Write the (quoted-if-spaced) path to the PTY the same way typed/pasted text
-  // is written. No newline: the path is inserted, not executed.
-  api.writeSession(props.sessionId, stringToBase64(formatPathForInsertion(path)))
+  // Quote for the shell that will parse this text, not for a generic one: a
+  // path means different things to PowerShell, cmd and a shell inside WSL.
+  const shell = sessions.state.sessions.find((s) => s.id === props.sessionId)?.shell ?? "";
+  const text = formatPathsForShell(paths, presetForProgram(shell), shell);
+  if (!text) return;
+  // Written to the PTY the same way typed/pasted text is. No newline, ever:
+  // the path is inserted at the cursor, and running it stays the user's call.
+  api.writeSession(props.sessionId, stringToBase64(text))
     .catch((e) => console.error("write failed", e));
   term?.focus();
 }

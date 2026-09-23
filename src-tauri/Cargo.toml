@@ -65,3 +65,8 @@ futures-util = "0.3"
 
 [target.'cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))'.dependencies]
 libc = "0.2"
+
+# Explorer context menus and the rhyme:// scheme are HKCU registry entries, so
+# they install without elevation and uninstall with the user's profile.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"

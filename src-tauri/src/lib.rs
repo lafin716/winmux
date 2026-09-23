@@ -7,6 +7,8 @@ pub mod flow;
 #[cfg(desktop)]
 pub mod ipc;
 #[cfg(desktop)]
+pub mod launch;
+#[cfg(desktop)]
 pub mod loop_routing;
 #[cfg(desktop)]
 pub mod mobile_pairing;
@@ -39,6 +41,21 @@ pub fn run() {
         .build()
         .expect("failed to build tokio runtime");
 
+    // Whatever started this process — Explorer's menu, a shell, an external
+    // tool, a `rhyme://` link — becomes one request. If a window is already
+    // open it takes the request and this process is done; `--new-window` is
+    // the one way to ask for a second one instead.
+    let request = launch::cli::from_env();
+    if !request.new_window {
+        match rt.block_on(launch::instance::deliver(&request)) {
+            Ok(true) => return,
+            Ok(false) => (),
+            // Delivery that failed halfway leaves the user's click unanswered,
+            // so open here rather than exit on a guess that it landed.
+            Err(error) => eprintln!("could not reach the running instance: {error:#}"),
+        }
+    }
+
     let client = rt
         .block_on(DaemonClient::connect_or_spawn())
         .expect("failed to connect/spawn winmuxd");
@@ -52,7 +69,40 @@ pub fn run() {
         .manage(mobile_pairing::MobilePairing::default())
         .manage(client.clone())
         .manage(rt.clone())
+        .manage(launch::Pending::default())
         .setup(move |app| {
+            // The request this process was started with waits with the ones
+            // that arrive later, so the page drains both the same way.
+            if !request.is_empty() {
+                app.state::<launch::Pending>().push(request.clone());
+            }
+            // An update installs to a new path; repoint whatever the user
+            // already asked Explorer to show before it launches a stale copy.
+            #[cfg(windows)]
+            if let Err(error) = launch::shell_integration::reconcile(launch::MENU_LABEL) {
+                eprintln!("could not refresh the Explorer menu entries: {error:#}");
+            }
+            let launches = app.handle().clone();
+            rt.spawn(async move {
+                let handler = move |request: launch::LaunchRequest| {
+                    // Foreground first: the click that sent this expects the
+                    // window, whether or not the page is listening yet.
+                    if let Some(window) = launches.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                    if !request.is_empty() {
+                        launches.state::<launch::Pending>().push(request.clone());
+                        let _ = launches.emit("launch-request", request);
+                    }
+                };
+                if let Err(error) = launch::instance::serve(handler).await {
+                    // Not fatal: this window simply will not receive external
+                    // launches, and another instance probably owns them.
+                    eprintln!("launch endpoint unavailable: {error:#}");
+                }
+            });
             let flow = app
                 .path()
                 .app_local_data_dir()
@@ -143,6 +193,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            launch::take_launch_requests,
+            launch::shell_integration_status,
+            launch::shell_integration_set,
             loop_routing::loop_request,
             flow::flow_request,
             mobile_pairing::mobile_pairing_interfaces,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LoopRoutingSettings from './LoopRoutingSettings.vue';
+import WindowsIntegrationSettings from './WindowsIntegrationSettings.vue';
 import AccountEnvEditor from "./AccountEnvEditor.vue";
 import MobilePairingSettings from "./MobilePairingSettings.vue";
 import SessionMenuSettings from "./SessionMenuSettings.vue";
@@ -67,7 +68,7 @@ function themePreviewVars(theme: AccentTheme): Record<string, string> {
   return accentCssVars(theme);
 }
 
-type Category = "loops" | "mobile" | "language" | "theme" | "terminal" | "accounts" | "workspaces" | "keybindings" | "palette";
+type Category = "loops" | "windows" | "mobile" | "language" | "theme" | "terminal" | "accounts" | "workspaces" | "keybindings" | "palette";
 const activeCategory = ref<Category>("language");
 
 const newProfileLabel = reactive<Record<CliAgentKind, string>>({ claude: "", codex: "" });
@@ -348,6 +349,13 @@ onUnmounted(() => {
               <div class="nav-desc">계정 전환 기준 및 실행 순서</div>
             </div>
           </button>
+          <button type="button" :class="['nav-item', { active: activeCategory === 'windows' }]" @click="activeCategory = 'windows'">
+            <div class="nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.4 9 4.5v5.1H3zM11 4.2l6-.9v6.3h-6zM3 10.9h6V16l-6-.9zM11 10.9h6v6.3l-6-.9z"/></svg></div>
+            <div class="nav-text">
+              <div class="nav-label">Windows 통합</div>
+              <div class="nav-desc">탐색기 메뉴 · 명령줄 · rhyme://</div>
+            </div>
+          </button>
           <button type="button" :class="['nav-item', { active: activeCategory === 'mobile' }]" @click="activeCategory = 'mobile'">
             <div class="nav-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="2" width="10" height="16" rx="2"/><path d="M8 15h4"/></svg></div>
             <div class="nav-text"><div class="nav-label">{{ t('Mobile connection') }}</div><div class="nav-desc">{{ t('Pair a phone over Tailscale') }}</div></div>
@@ -358,6 +366,7 @@ onUnmounted(() => {
       <main class="content">
         <div class="content-inner">
           <LoopRoutingSettings v-if="activeCategory === 'loops'" />
+          <WindowsIntegrationSettings v-else-if="activeCategory === 'windows'" />
           <MobilePairingSettings v-else-if="activeCategory === 'mobile'" />
           <template v-else-if="activeCategory === 'language'">
             <div class="panel-header">

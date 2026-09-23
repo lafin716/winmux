@@ -24,7 +24,7 @@ import {
   type ExplorerAction,
 } from "../lib/explorer-menu";
 import { resolveExplorerRoot, syncExplorerRoot } from "../lib/explorer-root";
-import { FILE_DRAG_MIME } from "../lib/path-insert";
+import { FILE_DRAG_MIME, toDragPayload } from "../lib/path-insert";
 import { resolveRightPanelTab } from "../lib/right-panel-tabs";
 import { explorerPanelTitle } from "../lib/explorer-panel-title";
 
@@ -211,14 +211,16 @@ async function activate(node: TreeNode): Promise<void> {
   }
 }
 
-// Start a file drag carrying the file's absolute path on a winmux-specific MIME
-// type, so dropping it on a Terminal inserts the path (see Terminal.vue) without
-// clashing with Pane-tab drags. Directory rows are not draggable. Click-to-open
-// still works — a click that isn't a drag falls through to `activate`.
+// Start a drag carrying the row's absolute path on a winmux-specific MIME type,
+// so dropping it on a Terminal inserts the path (see Terminal.vue) without
+// clashing with Pane-tab drags. Folders drag too: a terminal takes a directory
+// as an argument as readily as a file, and the path is inserted either way —
+// never `cd`-ed into, never run. Click-to-open still works — a click that isn't
+// a drag falls through to `activate`.
 function onRowDragStart(ev: DragEvent, node: TreeNode): void {
-  if (node.isDir || !ev.dataTransfer) return;
+  if (!ev.dataTransfer) return;
   ev.dataTransfer.effectAllowed = "copy";
-  ev.dataTransfer.setData(FILE_DRAG_MIME, node.path);
+  ev.dataTransfer.setData(FILE_DRAG_MIME, toDragPayload([node.path]));
 }
 
 // --- Tree lookups, used to refresh the right subtree after a file operation ---
@@ -476,7 +478,7 @@ const canSync = computed(() => !!focusedCwd.value);
             :class="['row', { dir: node.isDir, hidden: node.hidden }]"
             :style="{ paddingLeft: 6 + depth * 12 + 'px' }"
             :title="draft ? undefined : node.name"
-            :draggable="!node.isDir && !draft"
+            :draggable="!draft"
             @click="draft ? undefined : activate(node)"
             @contextmenu.prevent.stop="openMenu($event, draft ? null : node)"
             @dragstart="onRowDragStart($event, node)"
